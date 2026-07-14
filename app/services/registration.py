@@ -9,16 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.max_client import (
-    address_confirm_keyboard,
-    consent_keyboard,
-    contact_keyboard,
-    max_client,
-)
+from app.max_client import consent_keyboard, contact_keyboard, max_client
 from app.models import RegistrationState, Screenshot, User
-from app.services.dadata import normalize_address
+from app.services.address import apply_address_to_user
 from app.texts import (
-    ADDRESS_CONFIRM,
     ALREADY_REGISTERED,
     ASK_ADDRESS,
     ASK_FIO,
@@ -154,26 +148,6 @@ async def handle_callback(session: AsyncSession, update: dict[str, Any]) -> None
         await max_client.send_message(user.max_user_id, ASK_PHONE_MANUAL)
         return
 
-    if payload == "address_confirm_yes":
-        if user.state != RegistrationState.AWAITING_ADDRESS_CONFIRM:
-            return
-        user.state = RegistrationState.AWAITING_PHONE
-        await session.commit()
-        await max_client.send_message(user.max_user_id, ASK_PHONE, attachments=contact_keyboard())
-        return
-
-    if payload == "address_confirm_no":
-        user.address = None
-        user.address_normalized = None
-        user.district = None
-        user.region = None
-        user.city = None
-        user.settlement = None
-        user.address_qc = None
-        user.state = RegistrationState.AWAITING_ADDRESS
-        await session.commit()
-        await max_client.send_message(user.max_user_id, ASK_ADDRESS)
-
 
 async def handle_message_created(session: AsyncSession, update: dict[str, Any]) -> None:
     message = update.get("message") or {}
@@ -226,11 +200,9 @@ async def handle_message_created(session: AsyncSession, update: dict[str, Any]) 
         return
 
     if user.state == RegistrationState.AWAITING_ADDRESS_CONFIRM:
-        await max_client.send_message(
-            user.max_user_id,
-            "Пожалуйста, подтвердите адрес кнопками под сообщением выше.",
-            attachments=address_confirm_keyboard(),
-        )
+        user.state = RegistrationState.AWAITING_PHONE
+        await session.commit()
+        await max_client.send_message(user.max_user_id, ASK_PHONE, attachments=contact_keyboard())
         return
 
     if not text:
@@ -254,25 +226,10 @@ async def handle_message_created(session: AsyncSession, update: dict[str, Any]) 
 
 
 async def _process_address_input(session: AsyncSession, user: User, raw_address: str) -> None:
-    normalized = await normalize_address(raw_address)
-    user.address = normalized.raw
-    user.address_normalized = normalized.normalized
-    user.district = normalized.district
-    user.region = normalized.region
-    user.city = normalized.city
-    user.settlement = normalized.settlement
-    user.address_qc = normalized.quality_code
-    user.state = RegistrationState.AWAITING_ADDRESS_CONFIRM
+    await apply_address_to_user(user, raw_address)
+    user.state = RegistrationState.AWAITING_PHONE
     await session.commit()
-
-    await max_client.send_message(
-        user.max_user_id,
-        ADDRESS_CONFIRM.format(
-            normalized=normalized.normalized,
-            district=normalized.district,
-        ),
-        attachments=address_confirm_keyboard(),
-    )
+    await max_client.send_message(user.max_user_id, ASK_PHONE, attachments=contact_keyboard())
 
 
 async def _handle_registered_text(user: User, text: str) -> None:

@@ -11,14 +11,14 @@ class Base(DeclarativeBase):
 
 
 class RegistrationState(str, enum.Enum):
-    NEW = "new"
-    AWAITING_CONSENT = "awaiting_consent"
-    AWAITING_FIO = "awaiting_fio"
-    AWAITING_ADDRESS = "awaiting_address"
+    NEW = "NEW"
+    AWAITING_CONSENT = "AWAITING_CONSENT"
+    AWAITING_FIO = "AWAITING_FIO"
+    AWAITING_ADDRESS = "AWAITING_ADDRESS"
     AWAITING_ADDRESS_CONFIRM = "awaiting_address_confirm"
-    AWAITING_PHONE = "awaiting_phone"
+    AWAITING_PHONE = "AWAITING_PHONE"
     AWAITING_PHONE_MANUAL = "awaiting_phone_manual"
-    COMPLETED = "completed"
+    COMPLETED = "COMPLETED"
 
 
 class User(Base):

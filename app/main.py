@@ -20,6 +20,21 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+
+    async def _reprocess_addresses() -> None:
+        from app.database import async_session
+        from app.services.address import reprocess_existing_addresses
+
+        try:
+            async with async_session() as session:
+                count = await reprocess_existing_addresses(session)
+                logger.info("Startup address reprocessing finished: %s users", count)
+        except Exception:
+            logger.exception("Startup address reprocessing failed")
+
+    import asyncio
+
+    asyncio.create_task(_reprocess_addresses())
     yield
 
 
