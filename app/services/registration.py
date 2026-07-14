@@ -15,6 +15,7 @@ from app.services.address import apply_address_to_user
 from app.texts import (
     ALREADY_REGISTERED,
     ASK_ADDRESS,
+    ASK_BIRTH_YEAR,
     ASK_FIO,
     ASK_PHONE,
     ASK_PHONE_MANUAL,
@@ -22,6 +23,7 @@ from app.texts import (
     CONTACT_PARSE_FAILED,
     HELP_REGISTERED,
     INVALID_ADDRESS,
+    INVALID_BIRTH_YEAR,
     INVALID_FIO,
     INVALID_PHONE,
     PHONE_DUPLICATE,
@@ -49,6 +51,17 @@ def normalize_phone(phone: str) -> str:
 def is_valid_fio(value: str) -> bool:
     parts = [p for p in value.strip().split() if p]
     return len(parts) >= 2 and len(value.strip()) >= 5
+
+
+def is_valid_birth_year(value: str) -> int | None:
+    digits = re.sub(r"\D", "", value.strip())
+    if len(digits) != 4:
+        return None
+    year = int(digits)
+    current_year = datetime.now(timezone.utc).year
+    if 1925 <= year <= current_year - 14:
+        return year
+    return None
 
 
 def is_valid_address(value: str) -> bool:
@@ -213,6 +226,17 @@ async def handle_message_created(session: AsyncSession, update: dict[str, Any]) 
             await max_client.send_message(user.max_user_id, INVALID_FIO)
             return
         user.fio = text.strip()
+        user.state = RegistrationState.AWAITING_BIRTH_YEAR
+        await session.commit()
+        await max_client.send_message(user.max_user_id, ASK_BIRTH_YEAR)
+        return
+
+    if user.state == RegistrationState.AWAITING_BIRTH_YEAR:
+        birth_year = is_valid_birth_year(text)
+        if birth_year is None:
+            await max_client.send_message(user.max_user_id, INVALID_BIRTH_YEAR)
+            return
+        user.birth_year = birth_year
         user.state = RegistrationState.AWAITING_ADDRESS
         await session.commit()
         await max_client.send_message(user.max_user_id, ASK_ADDRESS)

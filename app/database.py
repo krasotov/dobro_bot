@@ -12,8 +12,9 @@ async_session = async_sessionmaker(engine, expire_on_commit=False)
 MIGRATIONS = [
     "ALTER TYPE registrationstate ADD VALUE IF NOT EXISTS 'awaiting_address_confirm'",
     "ALTER TYPE registrationstate ADD VALUE IF NOT EXISTS 'awaiting_phone_manual'",
+    "ALTER TYPE registrationstate ADD VALUE IF NOT EXISTS 'AWAITING_BIRTH_YEAR'",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS birth_year INTEGER",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS address_normalized TEXT",
-    "ALTER TABLE users ADD COLUMN IF NOT EXISTS district VARCHAR(255)",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS region VARCHAR(255)",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS city VARCHAR(255)",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS settlement VARCHAR(255)",
