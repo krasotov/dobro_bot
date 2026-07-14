@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -7,6 +8,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.max_client import consent_keyboard, contact_keyboard, max_client
 from app.models import RegistrationState, Screenshot, User
 from app.texts import (
@@ -15,6 +17,8 @@ from app.texts import (
     ASK_FIO,
     ASK_PHONE,
     CONSENT_TEXT,
+    CONTACT_PARSE_FAILED,
+    HELP_REGISTERED,
     INVALID_ADDRESS,
     INVALID_FIO,
     PHONE_DUPLICATE,
@@ -22,8 +26,12 @@ from app.texts import (
     REGISTRATION_COMPLETE,
     SCREENSHOT_NOT_REGISTERED,
     SCREENSHOT_RECEIVED,
+    STATUS_REGISTERED,
     WELCOME_TEXT,
 )
+from app.utils.contact import extract_contact_phone
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_phone(phone: str) -> str:
@@ -131,22 +139,40 @@ async def handle_message_created(
 
     user = await get_or_create_user(session, update)
     if not user:
+        logger.warning("message_created without user: %s", update)
         return
 
-    if user.is_registered and _has_image_attachment(attachments):
-        await _save_screenshot(session, user, message, attachments)
+    logger.info(
+        "message from %s state=%s text=%r attachments=%s",
+        user.max_user_id,
+        user.state,
+        text[:50] if text else "",
+        [a.get("type") for a in attachments],
+    )
+
+    if user.is_registered:
+        if _has_image_attachment(attachments):
+            await _save_screenshot(session, user, message, attachments)
+            return
+        if text:
+            await _handle_registered_text(user, text)
         return
 
     if user.state == RegistrationState.AWAITING_PHONE:
-        contact = _extract_verified_contact(attachments)
+        contact = extract_contact_phone(attachments, bot_token=settings.max_bot_token)
         if contact:
             await _complete_phone_step(session, user, contact)
             return
-        if text:
-            await max_client.send_message(user.max_user_id, PHONE_REQUIRED, attachments=contact_keyboard())
+
+        has_contact_attachment = any(a.get("type") == "contact" for a in attachments)
+        if has_contact_attachment:
+            await max_client.send_message(user.max_user_id, CONTACT_PARSE_FAILED, attachments=contact_keyboard())
+            return
+
+        await max_client.send_message(user.max_user_id, PHONE_REQUIRED, attachments=contact_keyboard())
         return
 
-    if not text or user.is_registered:
+    if not text:
         return
 
     if user.state == RegistrationState.AWAITING_FIO:
@@ -167,6 +193,14 @@ async def handle_message_created(
         user.state = RegistrationState.AWAITING_PHONE
         await session.commit()
         await max_client.send_message(user.max_user_id, ASK_PHONE, attachments=contact_keyboard())
+
+
+async def _handle_registered_text(user: User, text: str) -> None:
+    command = text.lower().strip()
+    if command in {"статус", "status"}:
+        await max_client.send_message(user.max_user_id, STATUS_REGISTERED)
+        return
+    await max_client.send_message(user.max_user_id, HELP_REGISTERED)
 
 
 async def _complete_phone_step(
@@ -195,18 +229,6 @@ async def _complete_phone_step(
         user.max_user_id,
         REGISTRATION_COMPLETE.format(fio=user.fio or "гражданин"),
     )
-
-
-def _extract_verified_contact(attachments: list[dict[str, Any]]) -> dict[str, Any] | None:
-    for attachment in attachments:
-        if attachment.get("type") != "contact":
-            continue
-        payload = attachment.get("payload") or {}
-        max_info = payload.get("max_info") or {}
-        phone = max_info.get("phone") or payload.get("phone")
-        if phone and payload.get("hash"):
-            return {"phone": phone, "hash": payload.get("hash")}
-    return None
 
 
 def _has_image_attachment(attachments: list[dict[str, Any]]) -> bool:

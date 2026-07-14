@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import logging
 from typing import Any
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
@@ -11,6 +12,9 @@ from app.config import settings
 from app.database import get_session, init_db
 from app.handlers.webhook import process_update
 from app.max_client import max_client
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -46,6 +50,7 @@ async def webhook(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     background_tasks.add_task(_process_update_bg, update)
+    logger.debug("Webhook accepted: %s", update.get("update_type"))
     return JSONResponse({"ok": True})
 
 
@@ -58,6 +63,7 @@ async def _process_update_bg(update: dict[str, Any]) -> None:
             await session.commit()
         except Exception:
             await session.rollback()
+            logger.exception("Failed to process update: %s", update.get("update_type"))
             raise
 
 
