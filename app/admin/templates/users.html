@@ -1,0 +1,27 @@
+{% extends "dashboard.html" %}
+{% block content %}
+<h1>Пользователи</h1>
+<p><a class="btn" href="/admin/users/export">Выгрузить в CSV</a></p>
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th><th>ФИО</th><th>Адрес</th><th>Телефон</th><th>Статус</th><th>Регистрация</th><th>Скрины</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for user in users %}
+      <tr>
+        <td>{{ user.id }}</td>
+        <td>{{ user.fio or "—" }}</td>
+        <td>{{ user.address or "—" }}</td>
+        <td>{{ user.phone or "—" }}</td>
+        <td>{% if user.is_registered %}Зарегистрирован{% else %}{{ user.state.value }}{% endif %}</td>
+        <td>{{ user.registered_at or "—" }}</td>
+        <td>{{ user.screenshots|length }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

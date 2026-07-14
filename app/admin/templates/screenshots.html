@@ -1,0 +1,20 @@
+{% extends "dashboard.html" %}
+{% block content %}
+<h1>Скриншоты</h1>
+<div class="card">
+  <table>
+    <thead><tr><th>ID</th><th>Пользователь</th><th>ФИО</th><th>Дата</th><th>Ссылка</th></tr></thead>
+    <tbody>
+      {% for s in screenshots %}
+      <tr>
+        <td>{{ s.id }}</td>
+        <td>{{ s.user.max_user_id }}</td>
+        <td>{{ s.user.fio or "—" }}</td>
+        <td>{{ s.created_at }}</td>
+        <td>{% if s.file_url %}<a href="{{ s.file_url }}" target="_blank">Открыть</a>{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
