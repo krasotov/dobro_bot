@@ -1,7 +1,8 @@
 import enum
+import json
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Enum, ForeignKey, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -14,7 +15,9 @@ class RegistrationState(str, enum.Enum):
     AWAITING_CONSENT = "awaiting_consent"
     AWAITING_FIO = "awaiting_fio"
     AWAITING_ADDRESS = "awaiting_address"
+    AWAITING_ADDRESS_CONFIRM = "awaiting_address_confirm"
     AWAITING_PHONE = "awaiting_phone"
+    AWAITING_PHONE_MANUAL = "awaiting_phone_manual"
     COMPLETED = "completed"
 
 
@@ -32,6 +35,13 @@ class User(Base):
 
     fio: Mapped[str | None] = mapped_column(String(500))
     address: Mapped[str | None] = mapped_column(Text)
+    address_normalized: Mapped[str | None] = mapped_column(Text)
+    district: Mapped[str | None] = mapped_column(String(255), index=True)
+    region: Mapped[str | None] = mapped_column(String(255))
+    city: Mapped[str | None] = mapped_column(String(255))
+    settlement: Mapped[str | None] = mapped_column(String(255))
+    address_qc: Mapped[int | None] = mapped_column(Integer)
+
     phone: Mapped[str | None] = mapped_column(String(32), index=True)
     phone_verified: Mapped[bool] = mapped_column(Boolean, default=False)
 
@@ -61,6 +71,7 @@ class Broadcast(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     text: Mapped[str] = mapped_column(Text)
     request_screenshot: Mapped[bool] = mapped_column(Boolean, default=False)
+    districts: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -70,6 +81,15 @@ class Broadcast(Base):
     failed_count: Mapped[int] = mapped_column(default=0)
 
     deliveries: Mapped[list["BroadcastDelivery"]] = relationship(back_populates="broadcast")
+
+    def get_district_list(self) -> list[str]:
+        if not self.districts:
+            return []
+        try:
+            data = json.loads(self.districts)
+            return [str(x) for x in data if x]
+        except json.JSONDecodeError:
+            return []
 
 
 class BroadcastDelivery(Base):

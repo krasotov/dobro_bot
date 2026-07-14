@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     max_bot_token: str = ""
     max_api_base: str = "https://platform-api2.max.ru"
@@ -17,10 +17,10 @@ class Settings(BaseSettings):
     webhook_url: str = ""
     app_host: str = "0.0.0.0"
     app_port: int = 8000
-
-    # Для API MAX может потребоваться сертификат Минцифры на сервере.
-    # На этапе отладки можно отключить проверку SSL.
     max_api_verify_ssl: bool = True
+
+    dadata_api_key: str = ""
+    dadata_secret_key: str = ""
 
 
 settings = Settings()

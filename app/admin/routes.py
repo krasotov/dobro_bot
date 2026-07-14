@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from app.database import async_session, get_session
 from app.models import Broadcast, Screenshot, User
-from app.services.broadcast import send_broadcast
+from app.services.broadcast import encode_districts, send_broadcast
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 templates = Jinja2Templates(directory="app/admin/templates")
@@ -21,6 +21,16 @@ templates = Jinja2Templates(directory="app/admin/templates")
 
 def _is_authenticated(request: Request) -> bool:
     return bool(request.session.get("admin"))
+
+
+async def _get_districts(session: AsyncSession) -> list[str]:
+    result = await session.execute(
+        select(User.district)
+        .where(User.district.is_not(None), User.district != "")
+        .distinct()
+        .order_by(User.district)
+    )
+    return [row[0] for row in result.all() if row[0]]
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -115,8 +125,11 @@ async def export_users(
             "ID",
             "MAX user_id",
             "ФИО",
-            "Адрес",
+            "Адрес (исходный)",
+            "Адрес (нормализованный)",
+            "Район",
             "Телефон",
+            "Телефон подтверждён",
             "Дата регистрации",
             "Скриншотов",
             "Активен",
@@ -129,7 +142,10 @@ async def export_users(
                 user.max_user_id,
                 user.fio or "",
                 user.address or "",
+                user.address_normalized or "",
+                user.district or "",
                 user.phone or "",
+                "да" if user.phone_verified else "нет",
                 user.registered_at.isoformat() if user.registered_at else "",
                 len(user.screenshots),
                 "да" if user.is_active else "нет",
@@ -155,8 +171,10 @@ async def broadcasts_page(
 
     result = await session.execute(select(Broadcast).order_by(Broadcast.created_at.desc()))
     broadcasts = result.scalars().all()
+    districts = await _get_districts(session)
     return templates.TemplateResponse(
-        "broadcasts.html", {"request": request, "broadcasts": broadcasts}
+        "broadcasts.html",
+        {"request": request, "broadcasts": broadcasts, "districts": districts},
     )
 
 
@@ -166,6 +184,7 @@ async def create_broadcast(
     background_tasks: BackgroundTasks,
     text: str = Form(...),
     request_screenshot: bool = Form(False),
+    districts: list[str] = Form(default=[]),
     session: AsyncSession = Depends(get_session),
 ):
     if not _is_authenticated(request):
@@ -178,7 +197,11 @@ async def create_broadcast(
             "нажав на скрепку 📎 в этом чате."
         )
 
-    broadcast = Broadcast(text=message_text, request_screenshot=request_screenshot)
+    broadcast = Broadcast(
+        text=message_text,
+        request_screenshot=request_screenshot,
+        districts=encode_districts(districts),
+    )
     session.add(broadcast)
     await session.commit()
     await session.refresh(broadcast)

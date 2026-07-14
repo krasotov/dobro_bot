@@ -140,7 +140,26 @@ def contact_keyboard() -> list[dict[str, Any]]:
         {
             "type": "inline_keyboard",
             "payload": {
-                "buttons": [[{"type": "request_contact", "text": "Поделиться контактом"}]]
+                "buttons": [
+                    [{"type": "request_contact", "text": "Поделиться контактом"}],
+                    [{"type": "callback", "text": "Ввести номер вручную", "payload": "phone_manual"}],
+                ]
+            },
+        }
+    ]
+
+
+def address_confirm_keyboard() -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "inline_keyboard",
+            "payload": {
+                "buttons": [
+                    [
+                        {"type": "callback", "text": "Да, верно", "payload": "address_confirm_yes"},
+                        {"type": "callback", "text": "Нет, исправить", "payload": "address_confirm_no"},
+                    ]
+                ]
             },
         }
     ]

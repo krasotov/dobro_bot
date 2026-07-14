@@ -7,20 +7,36 @@
 <div class="card">
   <h2>Новая рассылка</h2>
   <form method="post" action="/admin/broadcasts/create">
-    <p><textarea name="text" rows="6" style="width:100%" placeholder="Текст сообщения для всех зарегистрированных пользователей" required></textarea></p>
+    <p><textarea name="text" rows="6" style="width:100%" placeholder="Текст сообщения" required></textarea></p>
     <p><label><input type="checkbox" name="request_screenshot" value="true"> Просить приложить скриншот</label></p>
-    <button class="btn" type="submit">Отправить всем</button>
+
+    <h3>Кому отправить</h3>
+    <p>Если ничего не выбрать — отправится <b>всем</b> зарегистрированным.</p>
+    {% if districts %}
+    <div style="columns:2; margin-bottom:12px">
+      {% for district in districts %}
+      <label style="display:block; margin-bottom:6px">
+        <input type="checkbox" name="districts" value="{{ district }}"> {{ district }}
+      </label>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p><i>Районы появятся после регистрации пользователей с нормализованными адресами.</i></p>
+    {% endif %}
+
+    <button class="btn" type="submit">Отправить</button>
   </form>
 </div>
 <div class="card">
   <h2>История</h2>
   <table>
-    <thead><tr><th>ID</th><th>Дата</th><th>Получателей</th><th>Отправлено</th><th>Ошибок</th><th>Текст</th></tr></thead>
+    <thead><tr><th>ID</th><th>Дата</th><th>Районы</th><th>Получателей</th><th>Отправлено</th><th>Ошибок</th><th>Текст</th></tr></thead>
     <tbody>
       {% for b in broadcasts %}
       <tr>
         <td>{{ b.id }}</td>
         <td>{{ b.created_at }}</td>
+        <td>{% if b.get_district_list() %}{{ b.get_district_list()|join(', ') }}{% else %}всем{% endif %}</td>
         <td>{{ b.total_recipients }}</td>
         <td>{{ b.sent_count }}</td>
         <td>{{ b.failed_count }}</td>

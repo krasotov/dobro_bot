@@ -6,7 +6,7 @@
   <table>
     <thead>
       <tr>
-        <th>ID</th><th>ФИО</th><th>Адрес</th><th>Телефон</th><th>Статус</th><th>Регистрация</th><th>Скрины</th>
+        <th>ID</th><th>ФИО</th><th>Адрес</th><th>Район</th><th>Телефон</th><th>Подтв.</th><th>Статус</th><th>Регистрация</th><th>Скрины</th>
       </tr>
     </thead>
     <tbody>
@@ -14,8 +14,10 @@
       <tr>
         <td>{{ user.id }}</td>
         <td>{{ user.fio or "—" }}</td>
-        <td>{{ user.address or "—" }}</td>
+        <td>{{ user.address_normalized or user.address or "—" }}</td>
+        <td>{{ user.district or "—" }}</td>
         <td>{{ user.phone or "—" }}</td>
+        <td>{% if user.phone_verified %}да{% elif user.phone %}нет{% else %}—{% endif %}</td>
         <td>{% if user.is_registered %}Зарегистрирован{% else %}{{ user.state.value }}{% endif %}</td>
         <td>{{ user.registered_at or "—" }}</td>
         <td>{{ user.screenshots|length }}</td>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -18,9 +19,13 @@ async def send_broadcast(
 ) -> Broadcast:
     result = await session.execute(select(Broadcast).where(Broadcast.id == broadcast_id))
     broadcast = result.scalar_one()
-    users_result = await session.execute(
-        select(User).where(User.is_registered.is_(True), User.is_active.is_(True))
-    )
+
+    districts = broadcast.get_district_list()
+    query = select(User).where(User.is_registered.is_(True), User.is_active.is_(True))
+    if districts:
+        query = query.where(User.district.in_(districts))
+
+    users_result = await session.execute(query)
     users = users_result.scalars().all()
 
     broadcast.total_recipients = len(users)
@@ -55,3 +60,10 @@ async def send_broadcast(
     await session.commit()
     await session.refresh(broadcast)
     return broadcast
+
+
+def encode_districts(districts: list[str]) -> str | None:
+    cleaned = [d.strip() for d in districts if d and d.strip()]
+    if not cleaned:
+        return None
+    return json.dumps(cleaned, ensure_ascii=False)
