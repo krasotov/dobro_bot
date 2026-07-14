@@ -14,7 +14,7 @@ class RegistrationState(str, enum.Enum):
     NEW = "NEW"
     AWAITING_CONSENT = "AWAITING_CONSENT"
     AWAITING_FIO = "AWAITING_FIO"
-    AWAITING_BIRTH_YEAR = "AWAITING_BIRTH_YEAR"
+    AWAITING_BIRTH_DATE = "AWAITING_BIRTH_DATE"
     AWAITING_ADDRESS = "AWAITING_ADDRESS"
     AWAITING_ADDRESS_CONFIRM = "awaiting_address_confirm"
     AWAITING_PHONE = "AWAITING_PHONE"
@@ -35,7 +35,7 @@ class User(Base):
     )
 
     fio: Mapped[str | None] = mapped_column(String(500))
-    birth_year: Mapped[int | None] = mapped_column(Integer)
+    birth_date: Mapped[str | None] = mapped_column(String(10))
     address: Mapped[str | None] = mapped_column(Text)
     address_normalized: Mapped[str | None] = mapped_column(Text)
     district: Mapped[str | None] = mapped_column(String(255), index=True)
