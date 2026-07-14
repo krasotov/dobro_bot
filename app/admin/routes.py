@@ -11,16 +11,24 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.admin.auth import (
+    ROLE_SUPERADMIN,
+    admin_context,
+    can_manage_broadcasts,
+    require_auth,
+    require_superadmin,
+)
 from app.database import async_session, get_session
-from app.models import Broadcast, Screenshot, User
+from app.models import AdminRole, AdminUser, Broadcast, Screenshot, User
 from app.services.broadcast import encode_districts, send_broadcast
+from app.utils.password import hash_password, verify_password
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 templates = Jinja2Templates(directory="app/admin/templates")
 
 
-def _is_authenticated(request: Request) -> bool:
-    return bool(request.session.get("admin"))
+def _template_context(request: Request, **extra: object) -> dict[str, object]:
+    return {"request": request, **admin_context(request), **extra}
 
 
 async def _get_districts(session: AsyncSession) -> list[str]:
@@ -35,16 +43,43 @@ async def _get_districts(session: AsyncSession) -> list[str]:
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+    return templates.TemplateResponse(
+        "login.html",
+        {"request": request, "error": None},
+    )
 
 
 @router.post("/login")
-async def login(request: Request, username: str = Form(...), password: str = Form(...)):
+async def login(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    session: AsyncSession = Depends(get_session),
+):
     from app.config import settings
 
+    username = username.strip()
     if username == settings.admin_username and password == settings.admin_password:
         request.session["admin"] = True
+        request.session["admin_role"] = ROLE_SUPERADMIN
+        request.session["admin_username"] = username
+        request.session.pop("admin_id", None)
         return RedirectResponse("/admin/", status_code=303)
+
+    result = await session.execute(
+        select(AdminUser).where(
+            AdminUser.username == username,
+            AdminUser.is_active.is_(True),
+        )
+    )
+    admin_user = result.scalar_one_or_none()
+    if admin_user and verify_password(password, admin_user.password_hash):
+        request.session["admin"] = True
+        request.session["admin_role"] = admin_user.role.value
+        request.session["admin_username"] = admin_user.username
+        request.session["admin_id"] = admin_user.id
+        return RedirectResponse("/admin/broadcasts", status_code=303)
+
     return templates.TemplateResponse(
         "login.html",
         {"request": request, "error": "Неверный логин или пароль"},
@@ -63,8 +98,9 @@ async def dashboard(
     request: Request,
     session: AsyncSession = Depends(get_session),
 ):
-    if not _is_authenticated(request):
-        return RedirectResponse("/admin/login", status_code=303)
+    redirect = require_superadmin(request)
+    if redirect:
+        return redirect
 
     total = await session.scalar(select(func.count()).select_from(User))
     registered = await session.scalar(
@@ -72,16 +108,18 @@ async def dashboard(
     )
     screenshots = await session.scalar(select(func.count()).select_from(Screenshot))
     broadcasts = await session.scalar(select(func.count()).select_from(Broadcast))
+    staff_count = await session.scalar(select(func.count()).select_from(AdminUser))
 
     return templates.TemplateResponse(
         "dashboard.html",
-        {
-            "request": request,
-            "total": total or 0,
-            "registered": registered or 0,
-            "screenshots": screenshots or 0,
-            "broadcasts": broadcasts or 0,
-        },
+        _template_context(
+            request,
+            total=total or 0,
+            registered=registered or 0,
+            screenshots=screenshots or 0,
+            broadcasts=broadcasts or 0,
+            staff_count=staff_count or 0,
+        ),
     )
 
 
@@ -90,8 +128,9 @@ async def users_page(
     request: Request,
     session: AsyncSession = Depends(get_session),
 ):
-    if not _is_authenticated(request):
-        return RedirectResponse("/admin/login", status_code=303)
+    redirect = require_superadmin(request)
+    if redirect:
+        return redirect
 
     result = await session.execute(
         select(User)
@@ -99,7 +138,10 @@ async def users_page(
         .order_by(User.created_at.desc())
     )
     users = result.scalars().all()
-    return templates.TemplateResponse("users.html", {"request": request, "users": users})
+    return templates.TemplateResponse(
+        "users.html",
+        _template_context(request, users=users),
+    )
 
 
 @router.get("/users/export")
@@ -107,7 +149,8 @@ async def export_users(
     request: Request,
     session: AsyncSession = Depends(get_session),
 ):
-    if not _is_authenticated(request):
+    redirect = require_superadmin(request)
+    if redirect:
         raise HTTPException(status_code=401)
 
     result = await session.execute(
@@ -168,7 +211,10 @@ async def broadcasts_page(
     request: Request,
     session: AsyncSession = Depends(get_session),
 ):
-    if not _is_authenticated(request):
+    redirect = require_auth(request)
+    if redirect:
+        return redirect
+    if not can_manage_broadcasts(request):
         return RedirectResponse("/admin/login", status_code=303)
 
     result = await session.execute(select(Broadcast).order_by(Broadcast.created_at.desc()))
@@ -176,7 +222,7 @@ async def broadcasts_page(
     districts = await _get_districts(session)
     return templates.TemplateResponse(
         "broadcasts.html",
-        {"request": request, "broadcasts": broadcasts, "districts": districts},
+        _template_context(request, broadcasts=broadcasts, districts=districts),
     )
 
 
@@ -189,8 +235,11 @@ async def create_broadcast(
     districts: list[str] = Form(default=[]),
     session: AsyncSession = Depends(get_session),
 ):
-    if not _is_authenticated(request):
+    redirect = require_auth(request)
+    if redirect:
         raise HTTPException(status_code=401)
+    if not can_manage_broadcasts(request):
+        raise HTTPException(status_code=403)
 
     message_text = text.strip()
     if request_screenshot:
@@ -221,8 +270,9 @@ async def screenshots_page(
     request: Request,
     session: AsyncSession = Depends(get_session),
 ):
-    if not _is_authenticated(request):
-        return RedirectResponse("/admin/login", status_code=303)
+    redirect = require_superadmin(request)
+    if redirect:
+        return redirect
 
     result = await session.execute(
         select(Screenshot)
@@ -231,5 +281,92 @@ async def screenshots_page(
     )
     screenshots = result.scalars().all()
     return templates.TemplateResponse(
-        "screenshots.html", {"request": request, "screenshots": screenshots}
+        "screenshots.html",
+        _template_context(request, screenshots=screenshots),
     )
+
+
+@router.get("/staff", response_class=HTMLResponse)
+async def staff_page(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    redirect = require_superadmin(request)
+    if redirect:
+        return redirect
+
+    result = await session.execute(
+        select(AdminUser).order_by(AdminUser.created_at.desc())
+    )
+    staff = result.scalars().all()
+    return templates.TemplateResponse(
+        "staff.html",
+        _template_context(
+            request,
+            staff=staff,
+            error=request.query_params.get("error"),
+            success=request.query_params.get("success"),
+        ),
+    )
+
+
+@router.post("/staff/create")
+async def create_staff(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    display_name: str = Form(""),
+    session: AsyncSession = Depends(get_session),
+):
+    redirect = require_superadmin(request)
+    if redirect:
+        raise HTTPException(status_code=401)
+
+    username = username.strip().lower()
+    display_name = display_name.strip() or None
+
+    if len(username) < 3:
+        return RedirectResponse("/admin/staff?error=Логин+должен+быть+не+короче+3+символов", status_code=303)
+    if len(password) < 6:
+        return RedirectResponse("/admin/staff?error=Пароль+должен+быть+не+короче+6+символов", status_code=303)
+
+    from app.config import settings
+
+    if username == settings.admin_username.lower():
+        return RedirectResponse("/admin/staff?error=Этот+логин+зарезервирован", status_code=303)
+
+    existing = await session.scalar(
+        select(AdminUser.id).where(AdminUser.username == username)
+    )
+    if existing:
+        return RedirectResponse("/admin/staff?error=Пользователь+с+таким+логином+уже+есть", status_code=303)
+
+    admin_user = AdminUser(
+        username=username,
+        password_hash=hash_password(password),
+        display_name=display_name,
+        role=AdminRole.BROADCASTER,
+    )
+    session.add(admin_user)
+    await session.commit()
+    return RedirectResponse("/admin/staff?success=Оператор+добавлен", status_code=303)
+
+
+@router.post("/staff/{staff_id}/toggle")
+async def toggle_staff(
+    staff_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    redirect = require_superadmin(request)
+    if redirect:
+        raise HTTPException(status_code=401)
+
+    admin_user = await session.get(AdminUser, staff_id)
+    if not admin_user:
+        raise HTTPException(status_code=404)
+
+    admin_user.is_active = not admin_user.is_active
+    await session.commit()
+    status = "включён" if admin_user.is_active else "отключён"
+    return RedirectResponse(f"/admin/staff?success=Оператор+{status}", status_code=303)

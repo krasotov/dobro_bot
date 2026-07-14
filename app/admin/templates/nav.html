@@ -1,0 +1,14 @@
+<nav>
+  <strong>Доброчат — админ</strong>
+  {% if is_superadmin %}
+  <a href="/admin/">Главная</a>
+  <a href="/admin/users">Пользователи</a>
+  {% endif %}
+  <a href="/admin/broadcasts">Рассылки</a>
+  {% if is_superadmin %}
+  <a href="/admin/screenshots">Скриншоты</a>
+  <a href="/admin/staff">Операторы</a>
+  {% endif %}
+  <span style="float:right;opacity:.85">{{ admin_username }}</span>
+  <a href="/admin/logout" style="float:right;margin-right:16px">Выход</a>
+</nav>

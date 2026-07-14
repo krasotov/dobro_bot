@@ -1,14 +1,5 @@
 {% extends "base.html" %}
-{% block nav %}
-<nav>
-  <strong>Доброчат — админ</strong>
-  <a href="/admin/">Главная</a>
-  <a href="/admin/users">Пользователи</a>
-  <a href="/admin/broadcasts">Рассылки</a>
-  <a href="/admin/screenshots">Скриншоты</a>
-  <a href="/admin/logout">Выход</a>
-</nav>
-{% endblock %}
+{% block nav %}{% include "nav.html" %}{% endblock %}
 {% block content %}
 <h1>Панель управления</h1>
 <div class="stats">
@@ -21,5 +12,6 @@
   <h2>Быстрые действия</h2>
   <p><a class="btn" href="/admin/users/export">Выгрузить CSV</a></p>
   <p><a class="btn" href="/admin/broadcasts">Создать рассылку</a></p>
+  <p><a class="btn" href="/admin/staff">Операторы рассылок ({{ staff_count }})</a></p>
 </div>
 {% endblock %}

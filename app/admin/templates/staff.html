@@ -1,0 +1,67 @@
+{% extends "dashboard.html" %}
+{% block content %}
+<h1>Операторы рассылок</h1>
+{% if error %}<div class="card" style="background:#fef2f2;color:#b91c1c">{{ error }}</div>{% endif %}
+{% if success %}<div class="card" style="background:#ecfdf5">{{ success }}</div>{% endif %}
+
+<div class="card">
+  <h2>Добавить оператора</h2>
+  <p>Оператор сможет входить в админку и создавать рассылки. Доступ только к разделу «Рассылки».</p>
+  <form method="post" action="/admin/staff/create">
+    <p>
+      <label>Логин<br>
+        <input name="username" required minlength="3" maxlength="64" style="width:100%;max-width:320px;padding:8px">
+      </label>
+    </p>
+    <p>
+      <label>Имя (необязательно)<br>
+        <input name="display_name" maxlength="255" style="width:100%;max-width:320px;padding:8px" placeholder="Иванова М.">
+      </label>
+    </p>
+    <p>
+      <label>Пароль<br>
+        <input name="password" type="password" required minlength="6" style="width:100%;max-width:320px;padding:8px">
+      </label>
+    </p>
+    <button class="btn" type="submit">Добавить</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Список операторов</h2>
+  {% if staff %}
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Логин</th>
+        <th>Имя</th>
+        <th>Статус</th>
+        <th>Создан</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for member in staff %}
+      <tr>
+        <td>{{ member.id }}</td>
+        <td>{{ member.username }}</td>
+        <td>{{ member.display_name or "—" }}</td>
+        <td>{% if member.is_active %}активен{% else %}отключён{% endif %}</td>
+        <td>{{ member.created_at }}</td>
+        <td>
+          <form method="post" action="/admin/staff/{{ member.id }}/toggle" style="display:inline">
+            <button class="btn" type="submit" style="background:{% if member.is_active %}#6b7280{% else %}#166534{% endif %}">
+              {% if member.is_active %}Отключить{% else %}Включить{% endif %}
+            </button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>Пока нет добавленных операторов.</p>
+  {% endif %}
+</div>
+{% endblock %}
