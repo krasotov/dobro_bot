@@ -3,7 +3,7 @@ import logging
 from typing import Any
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -41,6 +41,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Доброчат MAX Bot", lifespan=lifespan)
 app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
 app.include_router(admin_router)
+
+
+@app.get("/")
+async def root() -> RedirectResponse:
+    return RedirectResponse("/admin/", status_code=302)
 
 
 @app.get("/health")
