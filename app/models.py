@@ -74,6 +74,8 @@ class Broadcast(Base):
     text: Mapped[str] = mapped_column(Text)
     request_screenshot: Mapped[bool] = mapped_column(Boolean, default=False)
     districts: Mapped[str | None] = mapped_column(Text)
+    image_token: Mapped[str | None] = mapped_column(String(512))
+    image_filename: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

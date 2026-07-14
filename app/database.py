@@ -24,6 +24,8 @@ MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS settlement VARCHAR(255)",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS address_qc INTEGER",
     "ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS districts TEXT",
+    "ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS image_token VARCHAR(512)",
+    "ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS image_filename VARCHAR(255)",
     "CREATE INDEX IF NOT EXISTS ix_users_district ON users (district)",
 ]
 

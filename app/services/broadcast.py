@@ -42,7 +42,11 @@ async def send_broadcast(
         await session.flush()
 
         try:
-            await max_client.send_message(user.max_user_id, broadcast.text)
+            await max_client.send_message_with_image(
+                user.max_user_id,
+                broadcast.text,
+                image_token=broadcast.image_token,
+            )
             delivery.status = "sent"
             delivery.sent_at = datetime.now(timezone.utc)
             sent += 1

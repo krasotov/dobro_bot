@@ -4,7 +4,7 @@ import csv
 import io
 from datetime import datetime
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
@@ -21,6 +21,7 @@ from app.admin.auth import (
 from app.database import async_session, get_session
 from app.models import AdminRole, AdminUser, Broadcast, Screenshot, User
 from app.services.broadcast import encode_districts, send_broadcast
+from app.services.broadcast_media import upload_broadcast_image, validate_broadcast_image
 from app.utils.password import hash_password, verify_password
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -222,7 +223,12 @@ async def broadcasts_page(
     districts = await _get_districts(session)
     return templates.TemplateResponse(
         "broadcasts.html",
-        _template_context(request, broadcasts=broadcasts, districts=districts),
+        _template_context(
+            request,
+            broadcasts=broadcasts,
+            districts=districts,
+            error=request.query_params.get("error"),
+        ),
     )
 
 
@@ -233,6 +239,7 @@ async def create_broadcast(
     text: str = Form(...),
     request_screenshot: bool = Form(False),
     districts: list[str] = Form(default=[]),
+    image: UploadFile | None = File(None),
     session: AsyncSession = Depends(get_session),
 ):
     redirect = require_auth(request)
@@ -242,6 +249,28 @@ async def create_broadcast(
         raise HTTPException(status_code=403)
 
     message_text = text.strip()
+    if not message_text:
+        return RedirectResponse("/admin/broadcasts?error=Введите+текст+сообщения", status_code=303)
+
+    image_token = None
+    image_filename = None
+    if image and image.filename:
+        content = await image.read()
+        validation_error = validate_broadcast_image(image.filename, content)
+        if validation_error:
+            return RedirectResponse(
+                f"/admin/broadcasts?error={validation_error.replace(' ', '+')}",
+                status_code=303,
+            )
+        try:
+            image_token = await upload_broadcast_image(content, image.filename)
+            image_filename = image.filename
+        except ValueError as exc:
+            return RedirectResponse(
+                f"/admin/broadcasts?error={str(exc).replace(' ', '+')[:200]}",
+                status_code=303,
+            )
+
     if request_screenshot:
         message_text += (
             "\n\nПосле выполнения действия, пожалуйста, пришлите скриншот, "
@@ -252,6 +281,8 @@ async def create_broadcast(
         text=message_text,
         request_screenshot=request_screenshot,
         districts=encode_districts(districts),
+        image_token=image_token,
+        image_filename=image_filename,
     )
     session.add(broadcast)
     await session.commit()

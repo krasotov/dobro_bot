@@ -4,10 +4,19 @@
 {% if request.query_params.get('started') %}
 <div class="card" style="background:#ecfdf5">Рассылка запущена в фоне. Обновите страницу через минуту.</div>
 {% endif %}
+{% if error %}
+<div class="card" style="background:#fef2f2;color:#b91c1c">{{ error }}</div>
+{% endif %}
 <div class="card">
   <h2>Новая рассылка</h2>
-  <form method="post" action="/admin/broadcasts/create">
+  <form method="post" action="/admin/broadcasts/create" enctype="multipart/form-data">
     <p><textarea name="text" rows="6" style="width:100%" placeholder="Текст сообщения" required></textarea></p>
+    <p>
+      <label>Картинка (необязательно)<br>
+        <input type="file" name="image" accept="image/jpeg,image/png,image/gif,image/tiff,image/bmp,image/heic,.jpg,.jpeg,.png,.gif,.tiff,.bmp,.heic">
+      </label>
+    </p>
+    <p style="color:#4b5563;font-size:14px">JPG, PNG, GIF и другие изображения до 50 МБ. Картинка отправится вместе с текстом.</p>
     <p><label><input type="checkbox" name="request_screenshot" value="true"> Просить приложить скриншот</label></p>
 
     <h3>Кому отправить</h3>
@@ -30,13 +39,14 @@
 <div class="card">
   <h2>История</h2>
   <table>
-    <thead><tr><th>ID</th><th>Дата</th><th>Районы</th><th>Получателей</th><th>Отправлено</th><th>Ошибок</th><th>Текст</th></tr></thead>
+    <thead><tr><th>ID</th><th>Дата</th><th>Районы</th><th>Картинка</th><th>Получателей</th><th>Отправлено</th><th>Ошибок</th><th>Текст</th></tr></thead>
     <tbody>
       {% for b in broadcasts %}
       <tr>
         <td>{{ b.id }}</td>
         <td>{{ b.created_at }}</td>
         <td>{% if b.get_district_list() %}{{ b.get_district_list()|join(', ') }}{% else %}всем{% endif %}</td>
+        <td>{% if b.image_filename %}{{ b.image_filename }}{% elif b.image_token %}да{% else %}—{% endif %}</td>
         <td>{{ b.total_recipients }}</td>
         <td>{{ b.sent_count }}</td>
         <td>{{ b.failed_count }}</td>
