@@ -32,6 +32,8 @@ MIGRATIONS = [
     "ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS auto_from_channel BOOLEAN DEFAULT FALSE",
     "CREATE UNIQUE INDEX IF NOT EXISTS ix_broadcasts_source_message_id ON broadcasts (source_message_id) WHERE source_message_id IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS ix_users_district ON users (district)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS appeal_flow_state VARCHAR(16) DEFAULT 'none'",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS appeal_draft_subject VARCHAR(200)",
 ]
 
 

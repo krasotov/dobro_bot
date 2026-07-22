@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 from app.config import settings
 from app.database import async_session, get_session
 from app.internal.auth import require_internal_api_token
+from app.max_client import max_client
 from app.models import AdminRole, AdminUser, Broadcast, NewsChannelSource, Screenshot, User
 from app.services.broadcast import encode_districts, send_broadcast
 from app.services.broadcast_media import upload_broadcast_image, validate_broadcast_image
@@ -159,6 +160,21 @@ class CreateStaffBody(BaseModel):
     username: str = Field(min_length=3, max_length=64)
     password: str = Field(min_length=6, max_length=128)
     displayName: str | None = Field(default=None, max_length=255)
+
+
+class NotifyUserBody(BaseModel):
+    maxUserId: int | str = Field(...)
+    text: str = Field(min_length=1, max_length=4000)
+
+
+@router.post("/users/notify")
+async def notify_user(
+    body: NotifyUserBody,
+    _: None = Depends(require_internal_api_token),
+) -> dict:
+    max_user_id = int(body.maxUserId)
+    await max_client.send_message(max_user_id, body.text.strip())
+    return {"success": True}
 
 
 @router.get("/staff")

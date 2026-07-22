@@ -36,6 +36,7 @@ from app.texts import (
     STATUS_REGISTERED,
     WELCOME_TEXT,
 )
+from app.services.appeal_flow import handle_appeal_flow_message, send_appeal_hint, try_start_appeal_flow
 from app.utils.birth_date import parse_birth_date
 from app.utils.contact import extract_contact_phone
 
@@ -176,7 +177,9 @@ async def handle_message_created(session: AsyncSession, update: dict[str, Any]) 
             await _save_screenshot(session, user, message, attachments)
             return
         if text:
-            await _handle_registered_text(user, text)
+            if await handle_appeal_flow_message(session, user, text):
+                return
+            await _handle_registered_text(session, user, text)
         return
 
     if user.state == RegistrationState.AWAITING_PHONE:
@@ -246,12 +249,18 @@ async def _process_address_input(session: AsyncSession, user: User, raw_address:
     await max_client.send_message(user.max_user_id, ASK_PHONE, attachments=contact_keyboard())
 
 
-async def _handle_registered_text(user: User, text: str) -> None:
+async def _handle_registered_text(session: AsyncSession, user: User, text: str) -> None:
     command = text.lower().strip()
     if command in {"статус", "status"}:
         await max_client.send_message(user.max_user_id, STATUS_REGISTERED)
         return
-    await max_client.send_message(user.max_user_id, HELP_REGISTERED)
+    if command in {"обращение", "appeal", "заявка"}:
+        await try_start_appeal_flow(session, user)
+        return
+    if command in {"помощь", "help"}:
+        await max_client.send_message(user.max_user_id, HELP_REGISTERED)
+        return
+    await send_appeal_hint(user)
 
 
 async def _complete_phone_step(

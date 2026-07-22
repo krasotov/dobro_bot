@@ -47,6 +47,9 @@ class User(Base):
     phone: Mapped[str | None] = mapped_column(String(32), index=True)
     phone_verified: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    appeal_flow_state: Mapped[str | None] = mapped_column(String(16), default="none")
+    appeal_draft_subject: Mapped[str | None] = mapped_column(String(200))
+
     consent_given: Mapped[bool] = mapped_column(Boolean, default=False)
     consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

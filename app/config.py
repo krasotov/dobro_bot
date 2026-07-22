@@ -27,5 +27,8 @@ class Settings(BaseSettings):
     # Сервисный доступ для admspgo.ru (read-only overview). Пусто — эндпоинты /internal/v1 отключены.
     internal_api_token: str = ""
 
+    admspgo_api_url: str = "https://admspgo.ru"
+    admspgo_internal_token: str = ""
+
 
 settings = Settings()
