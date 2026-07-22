@@ -34,7 +34,7 @@
           <td class="num">{{ user.max_user_id }}</td>
           <td class="truncate" title="{{ user.fio or '' }}">{{ user.fio or "—" }}</td>
           <td class="nowrap">{{ user.birth_date or "—" }}</td>
-          <td class="truncate" title="{{ address }}">{{ address }}</td>
+          <td class="cell-address">{{ address }}</td>
           <td class="truncate" title="{{ user.district or '' }}">{{ user.district or "—" }}</td>
           <td class="nowrap">{{ user.phone or "—" }}</td>
           <td class="nowrap">{% if user.phone_verified %}да{% elif user.phone %}нет{% else %}—{% endif %}</td>
