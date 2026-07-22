@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.admin.routes import router as admin_router
+from app.internal.routes import router as internal_router
 from app.config import settings
 from app.database import get_session, init_db
 from app.handlers.webhook import process_update
@@ -41,6 +42,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Доброчат MAX Bot", lifespan=lifespan)
 app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
 app.include_router(admin_router)
+app.include_router(internal_router)
 
 
 @app.get("/")

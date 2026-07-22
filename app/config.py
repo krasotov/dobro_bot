@@ -24,5 +24,8 @@ class Settings(BaseSettings):
     dadata_api_key: str = ""
     dadata_secret_key: str = ""
 
+    # Сервисный доступ для admspgo.ru (read-only overview). Пусто — эндпоинты /internal/v1 отключены.
+    internal_api_token: str = ""
+
 
 settings = Settings()
