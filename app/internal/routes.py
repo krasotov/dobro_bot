@@ -1,20 +1,26 @@
 from __future__ import annotations
 
-from datetime import datetime
+import logging
 
-from fastapi import APIRouter, Depends, Query
+import httpx
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_session
+from app.database import async_session, get_session
 from app.internal.auth import require_internal_api_token
 from app.models import Broadcast, Screenshot, User
+from app.services.broadcast import encode_districts, send_broadcast
+from app.services.broadcast_media import upload_broadcast_image, validate_broadcast_image
 from app.services.channel_news import get_news_channel_source
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/internal/v1", tags=["internal"])
 
 
-def _iso(dt: datetime | None) -> str | None:
+def _iso(dt) -> str | None:
     if dt is None:
         return None
     return dt.isoformat()
@@ -25,6 +31,106 @@ def _text_preview(text: str, limit: int = 200) -> str:
     if len(cleaned) <= limit:
         return cleaned
     return cleaned[: limit - 1].rstrip() + "…"
+
+
+async def _send_broadcast_bg(broadcast_id: int) -> None:
+    async with async_session() as session:
+        try:
+            await send_broadcast(session, broadcast_id)
+        except Exception:
+            logger.exception("Background send_broadcast failed for id=%s", broadcast_id)
+
+
+class CreateBroadcastBody(BaseModel):
+    text: str = Field(min_length=1, max_length=12000)
+    image_url: str | None = Field(default=None, max_length=2048)
+    districts: list[str] | None = None
+    source_post_id: str | None = Field(default=None, max_length=64)
+
+
+@router.post("/broadcasts")
+async def create_broadcast(
+    body: CreateBroadcastBody,
+    background_tasks: BackgroundTasks,
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    image_token: str | None = None
+    image_url: str | None = body.image_url
+    image_filename: str | None = None
+
+    if body.image_url:
+        try:
+            async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+                response = await client.get(body.image_url)
+            if response.status_code == 200 and response.content:
+                path_part = body.image_url.split("/")[-1].split("?")[0] or "image.jpg"
+                if "." not in path_part:
+                    path_part = "image.jpg"
+                err = validate_broadcast_image(path_part, response.content)
+                if not err:
+                    image_token = await upload_broadcast_image(response.content, path_part)
+                    image_url = None
+                    image_filename = path_part
+        except Exception:
+            logger.exception("Failed to mirror image for broadcast from %s", body.image_url[:120])
+
+    broadcast = Broadcast(
+        text=body.text.strip(),
+        districts=encode_districts(body.districts or []),
+        image_token=image_token,
+        image_url=image_url,
+        image_filename=image_filename,
+        auto_from_channel=False,
+    )
+    session.add(broadcast)
+    await session.commit()
+    await session.refresh(broadcast)
+
+    background_tasks.add_task(_send_broadcast_bg, broadcast.id)
+
+    return {"broadcastId": broadcast.id, "status": "queued"}
+
+
+@router.get("/districts")
+async def list_districts(
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    result = await session.execute(
+        select(User.district)
+        .where(User.district.is_not(None), User.district != "")
+        .distinct()
+        .order_by(User.district)
+    )
+    districts = [row[0] for row in result.all() if row[0]]
+    return {"districts": districts}
+
+
+@router.get("/users")
+async def list_users(
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> dict:
+    result = await session.execute(
+        select(User).order_by(User.created_at.desc()).limit(limit)
+    )
+    users = []
+    for u in result.scalars().all():
+        users.append(
+            {
+                "id": u.id,
+                "maxUserId": u.max_user_id,
+                "fio": u.fio,
+                "district": u.district,
+                "phone": u.phone,
+                "isRegistered": u.is_registered,
+                "isActive": u.is_active,
+                "createdAt": _iso(u.created_at),
+            }
+        )
+    return {"users": users}
 
 
 @router.get("/summary")
