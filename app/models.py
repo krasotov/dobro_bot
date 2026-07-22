@@ -75,7 +75,11 @@ class Broadcast(Base):
     request_screenshot: Mapped[bool] = mapped_column(Boolean, default=False)
     districts: Mapped[str | None] = mapped_column(Text)
     image_token: Mapped[str | None] = mapped_column(String(512))
+    image_url: Mapped[str | None] = mapped_column(Text)
     image_filename: Mapped[str | None] = mapped_column(String(255))
+    source_chat_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
+    source_message_id: Mapped[str | None] = mapped_column(String(128), unique=True)
+    auto_from_channel: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -112,6 +116,25 @@ class BroadcastDelivery(Base):
 
 class AdminRole(str, enum.Enum):
     BROADCASTER = "broadcaster"
+
+
+class NewsChannelSource(Base):
+    __tablename__ = "news_channel_sources"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    channel_slug: Mapped[str] = mapped_column(String(128), default="OErohanovaSP")
+    channel_url: Mapped[str] = mapped_column(
+        String(255), default="https://max.ru/OErohanovaSP"
+    )
+    title: Mapped[str | None] = mapped_column(String(255))
+    chat_id: Mapped[int | None] = mapped_column(BigInteger, unique=True)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class AdminUser(Base):

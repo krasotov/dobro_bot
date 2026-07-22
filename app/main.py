@@ -76,11 +76,14 @@ async def webhook(
 
 async def _process_update_bg(update: dict[str, Any]) -> None:
     from app.database import async_session
+    from app.services.broadcast import send_broadcast
 
     async with async_session() as session:
         try:
-            await process_update(session, update)
+            broadcast_id = await process_update(session, update)
             await session.commit()
+            if broadcast_id is not None:
+                await send_broadcast(session, broadcast_id)
         except Exception:
             await session.rollback()
             logger.exception("Failed to process update: %s", update.get("update_type"))

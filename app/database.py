@@ -25,9 +25,33 @@ MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS address_qc INTEGER",
     "ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS districts TEXT",
     "ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS image_token VARCHAR(512)",
+    "ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS image_url TEXT",
     "ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS image_filename VARCHAR(255)",
+    "ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS source_chat_id BIGINT",
+    "ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS source_message_id VARCHAR(128)",
+    "ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS auto_from_channel BOOLEAN DEFAULT FALSE",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_broadcasts_source_message_id ON broadcasts (source_message_id) WHERE source_message_id IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS ix_users_district ON users (district)",
 ]
+
+
+async def ensure_news_channel_source() -> None:
+    from sqlalchemy import select
+
+    from app.models import NewsChannelSource
+
+    async with async_session() as session:
+        result = await session.execute(select(NewsChannelSource.id).limit(1))
+        if result.scalar_one_or_none() is not None:
+            return
+        session.add(
+            NewsChannelSource(
+                channel_slug="OErohanovaSP",
+                channel_url="https://max.ru/OErohanovaSP",
+                title="Канал главы Сергиево-Посадского ГО",
+            )
+        )
+        await session.commit()
 
 
 async def init_db() -> None:
@@ -40,6 +64,8 @@ async def init_db() -> None:
                 await conn.execute(text(stmt))
         except Exception as exc:
             logger.warning("Migration skipped: %s (%s)", stmt[:80], exc)
+
+    await ensure_news_channel_source()
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

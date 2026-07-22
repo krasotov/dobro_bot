@@ -116,11 +116,17 @@ class MaxClient:
         text: str,
         *,
         image_token: str | None = None,
+        image_url: str | None = None,
         format: str = "html",
     ) -> dict[str, Any]:
         attachments = None
-        if image_token:
-            attachments = [{"type": "image", "payload": {"token": image_token}}]
+        if image_token or image_url:
+            payload: dict[str, Any] = {}
+            if image_token:
+                payload["token"] = image_token
+            elif image_url:
+                payload["url"] = image_url
+            attachments = [{"type": "image", "payload": payload}]
 
         last_error: MaxApiError | None = None
         for attempt in range(4):
@@ -169,6 +175,7 @@ class MaxClient:
         update_types: list[str] | None = None,
     ) -> dict[str, Any]:
         types = update_types or [
+            "bot_added",
             "bot_started",
             "bot_stopped",
             "message_created",

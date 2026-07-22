@@ -46,6 +46,7 @@ async def send_broadcast(
                 user.max_user_id,
                 broadcast.text,
                 image_token=broadcast.image_token,
+                image_url=broadcast.image_url,
             )
             delivery.status = "sent"
             delivery.sent_at = datetime.now(timezone.utc)

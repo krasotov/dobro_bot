@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     app_port: int = 8000
     max_api_verify_ssl: bool = True
 
+    news_source_chat_id: int | None = None
+
     dadata_api_key: str = ""
     dadata_secret_key: str = ""
 

@@ -1,0 +1,56 @@
+{% extends "dashboard.html" %}
+{% block content %}
+<h1>Автоновости из канала</h1>
+{% if success %}<div class="card" style="background:#ecfdf5">{{ success }}</div>{% endif %}
+
+<div class="card">
+  <h2>Источник</h2>
+  <p><a href="{{ source.channel_url }}" target="_blank">{{ source.channel_url }}</a></p>
+  <p>{{ source.title or "Канал главы" }}</p>
+  <p>
+    <b>Автоматическая рассылка:</b>
+    {% if source.is_enabled %}включена{% else %}выключена{% endif %}
+  </p>
+  <p>
+    <b>chat_id канала:</b>
+    {% if source.chat_id %}
+      {{ source.chat_id }}
+    {% else %}
+      ещё не привязан — добавьте бота администратором в канал
+    {% endif %}
+  </p>
+  <p style="color:#4b5563;font-size:14px">
+    После добавления бота в канал <code>max.ru/OErohanovaSP</code> система сама сохранит chat_id.
+    Каждый новый пост из канала будет автоматически отправляться всем зарегистрированным пользователям бота.
+  </p>
+  <form method="post" action="/admin/news-channel/toggle">
+    <button class="btn" type="submit">
+      {% if source.is_enabled %}Выключить автоновости{% else %}Включить автоновости{% endif %}
+    </button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Последние автоматические рассылки</h2>
+  {% if auto_broadcasts %}
+  <table>
+    <thead>
+      <tr><th>ID</th><th>Дата</th><th>Отправлено</th><th>Ошибок</th><th>Текст</th></tr>
+    </thead>
+    <tbody>
+      {% for b in auto_broadcasts %}
+      <tr>
+        <td>{{ b.id }}</td>
+        <td>{{ b.created_at }}</td>
+        <td>{{ b.sent_count }}/{{ b.total_recipients }}</td>
+        <td>{{ b.failed_count }}</td>
+        <td>{{ b.text[:120] }}{% if b.text|length > 120 %}...{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>Пока не было автоматических рассылок.</p>
+  {% endif %}
+</div>
+{% endblock %}

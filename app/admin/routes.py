@@ -19,9 +19,10 @@ from app.admin.auth import (
     require_superadmin,
 )
 from app.database import async_session, get_session
-from app.models import AdminRole, AdminUser, Broadcast, Screenshot, User
+from app.models import AdminRole, AdminUser, Broadcast, NewsChannelSource, Screenshot, User
 from app.services.broadcast import encode_districts, send_broadcast
 from app.services.broadcast_media import upload_broadcast_image, validate_broadcast_image
+from app.services.channel_news import get_news_channel_source
 from app.utils.password import hash_password, verify_password
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -401,3 +402,60 @@ async def toggle_staff(
     await session.commit()
     status = "включён" if admin_user.is_active else "отключён"
     return RedirectResponse(f"/admin/staff?success=Оператор+{status}", status_code=303)
+
+
+@router.get("/news-channel", response_class=HTMLResponse)
+async def news_channel_page(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    redirect = require_superadmin(request)
+    if redirect:
+        return redirect
+
+    source = await get_news_channel_source(session)
+    if not source:
+        source = NewsChannelSource(
+            channel_slug="OErohanovaSP",
+            channel_url="https://max.ru/OErohanovaSP",
+            title="Канал главы Сергиево-Посадского ГО",
+        )
+        session.add(source)
+        await session.commit()
+        await session.refresh(source)
+
+    result = await session.execute(
+        select(Broadcast)
+        .where(Broadcast.auto_from_channel.is_(True))
+        .order_by(Broadcast.created_at.desc())
+        .limit(20)
+    )
+    auto_broadcasts = result.scalars().all()
+    return templates.TemplateResponse(
+        "news_channel.html",
+        _template_context(
+            request,
+            source=source,
+            auto_broadcasts=auto_broadcasts,
+            success=request.query_params.get("success"),
+        ),
+    )
+
+
+@router.post("/news-channel/toggle")
+async def toggle_news_channel(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    redirect = require_superadmin(request)
+    if redirect:
+        raise HTTPException(status_code=401)
+
+    source = await get_news_channel_source(session)
+    if not source:
+        raise HTTPException(status_code=404)
+
+    source.is_enabled = not source.is_enabled
+    await session.commit()
+    status = "включены" if source.is_enabled else "выключены"
+    return RedirectResponse(f"/admin/news-channel?success=Автоновости+{status}", status_code=303)
