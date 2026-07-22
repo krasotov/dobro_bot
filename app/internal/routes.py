@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +14,7 @@ from app.models import Broadcast, Screenshot, User
 from app.services.broadcast import encode_districts, send_broadcast
 from app.services.broadcast_media import upload_broadcast_image, validate_broadcast_image
 from app.services.channel_news import get_news_channel_source
+from app.services.user_admin import delete_user_record
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +132,22 @@ async def list_users(
             }
         )
     return {"users": users}
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(
+    user_id: int,
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    user = await delete_user_record(session, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {
+        "success": True,
+        "deletedUserId": user.id,
+        "maxUserId": user.max_user_id,
+    }
 
 
 @router.get("/summary")
