@@ -6,7 +6,7 @@
   <title>Доброчат — админ</title>
   <style>
     body { font-family: system-ui, sans-serif; margin: 0; background: #f4f6f8; color: #1a1a1a; }
-    .wrap { max-width: 1280px; margin: 0 auto; padding: 24px; }
+    .wrap { max-width: 920px; margin: 0 auto; padding: 24px; }
     nav { background: #1e3a5f; color: #fff; padding: 14px 24px; overflow: hidden; }
     nav a { color: #fff; margin-right: 16px; text-decoration: none; }
     nav span { white-space: nowrap; }
@@ -19,7 +19,18 @@
     td.num, th.num { text-align: right; white-space: nowrap; }
     td.nowrap { white-space: nowrap; }
     td.truncate { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    td.cell-address { min-width: 260px; max-width: 360px; white-space: normal; word-break: break-word; line-height: 1.4; }
+    .user-list { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+    .user-item { border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; background: #fafbfc; }
+    .user-item-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
+    .user-item-head strong { font-size: 17px; }
+    .user-meta { color: #4b5563; font-size: 13px; }
+    .user-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px 16px; font-size: 14px; margin-bottom: 10px; }
+    .user-grid dt { color: #6b7280; font-size: 12px; margin: 0 0 2px; }
+    .user-grid dd { margin: 0 0 8px; word-break: break-word; }
+    .user-address { font-size: 14px; line-height: 1.45; margin-bottom: 12px; word-break: break-word; }
+    .user-address-label { color: #6b7280; font-size: 12px; margin-bottom: 4px; }
+    .badge { display: inline-block; background: #e0e7ef; color: #1e3a5f; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+    .badge-ok { background: #dcfce7; color: #166534; }
     .btn { display: inline-block; background: #1e3a5f; color: #fff; padding: 10px 16px; border-radius: 8px; text-decoration: none; border: 0; cursor: pointer; font-size: 14px; }
     .btn-sm { padding: 6px 10px; font-size: 12px; white-space: nowrap; }
     .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
