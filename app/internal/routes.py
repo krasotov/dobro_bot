@@ -7,10 +7,11 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.database import async_session, get_session
 from app.internal.auth import require_internal_api_token
-from app.models import Broadcast, Screenshot, User
+from app.models import Broadcast, NewsChannelSource, Screenshot, User
 from app.services.broadcast import encode_districts, send_broadcast
 from app.services.broadcast_media import upload_broadcast_image, validate_broadcast_image
 from app.services.channel_news import get_news_channel_source
@@ -150,6 +151,36 @@ async def delete_user(
     }
 
 
+@router.get("/screenshots")
+async def list_screenshots(
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> dict:
+    result = await session.execute(
+        select(Screenshot)
+        .options(selectinload(Screenshot.user))
+        .order_by(Screenshot.created_at.desc())
+        .limit(limit)
+    )
+    items = []
+    for shot in result.scalars().all():
+        user = shot.user
+        items.append(
+            {
+                "id": shot.id,
+                "createdAt": _iso(shot.created_at),
+                "fileUrl": shot.file_url,
+                "hasFileToken": bool(shot.file_token),
+                "broadcastId": shot.broadcast_id,
+                "userId": user.id if user else None,
+                "maxUserId": user.max_user_id if user else None,
+                "fio": user.fio if user else None,
+            }
+        )
+    return {"screenshots": items}
+
+
 @router.get("/summary")
 async def summary(
     _: None = Depends(require_internal_api_token),
@@ -212,6 +243,26 @@ async def news_channel(
     source = await get_news_channel_source(session)
     if not source:
         return {"configured": False}
+
+    auto_result = await session.execute(
+        select(Broadcast)
+        .where(Broadcast.auto_from_channel.is_(True))
+        .order_by(Broadcast.created_at.desc())
+        .limit(15)
+    )
+    auto_broadcasts = []
+    for b in auto_result.scalars().all():
+        auto_broadcasts.append(
+            {
+                "id": b.id,
+                "createdAt": _iso(b.created_at),
+                "textPreview": _text_preview(b.text),
+                "sentCount": b.sent_count,
+                "totalRecipients": b.total_recipients,
+                "failedCount": b.failed_count,
+            }
+        )
+
     return {
         "configured": True,
         "channelSlug": source.channel_slug,
@@ -220,4 +271,31 @@ async def news_channel(
         "chatId": source.chat_id,
         "isEnabled": source.is_enabled,
         "updatedAt": _iso(source.updated_at),
+        "autoBroadcasts": auto_broadcasts,
+    }
+
+
+@router.post("/news-channel/toggle")
+async def toggle_news_channel(
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    source = await get_news_channel_source(session)
+    if not source:
+        source = NewsChannelSource(
+            channel_slug="OErohanovaSP",
+            channel_url="https://max.ru/OErohanovaSP",
+            title="Канал главы Сергиево-Посадского ГО",
+        )
+        session.add(source)
+        await session.flush()
+
+    source.is_enabled = not source.is_enabled
+    await session.commit()
+    await session.refresh(source)
+
+    return {
+        "isEnabled": source.is_enabled,
+        "chatId": source.chat_id,
+        "channelUrl": source.channel_url,
     }
