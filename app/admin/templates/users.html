@@ -2,17 +2,24 @@
 {% block content %}
 <h1>Пользователи</h1>
 <p><a class="btn" href="/admin/users/export">Выгрузить в CSV</a></p>
+{% if success %}<div class="card" style="background:#ecfdf5">{{ success }}</div>{% endif %}
+{% if error %}<div class="card" style="background:#fef2f2;color:#b91c1c">{{ error }}</div>{% endif %}
 <div class="card">
+  <p style="color:#4b5563;font-size:14px">
+    Удаление убирает запись из базы. Человек сможет снова нажать «Начать» в боте и пройти регистрацию с нуля
+    (например, если раньше указал неверные данные).
+  </p>
   <table>
     <thead>
       <tr>
-        <th>ID</th><th>ФИО</th><th>Дата рожд.</th><th>Адрес</th><th>Район</th><th>Телефон</th><th>Подтв.</th><th>Статус</th><th>Регистрация</th><th>Скрины</th>
+        <th>ID</th><th>MAX ID</th><th>ФИО</th><th>Дата рожд.</th><th>Адрес</th><th>Район</th><th>Телефон</th><th>Подтв.</th><th>Статус</th><th>Регистрация</th><th>Скрины</th><th></th>
       </tr>
     </thead>
     <tbody>
       {% for user in users %}
       <tr>
         <td>{{ user.id }}</td>
+        <td>{{ user.max_user_id }}</td>
         <td>{{ user.fio or "—" }}</td>
         <td>{{ user.birth_date or "—" }}</td>
         <td>{{ user.address_normalized or user.address or "—" }}</td>
@@ -22,6 +29,12 @@
         <td>{% if user.is_registered %}Зарегистрирован{% else %}{{ user.state.value }}{% endif %}</td>
         <td>{{ user.registered_at or "—" }}</td>
         <td>{{ user.screenshots|length }}</td>
+        <td>
+          <form method="post" action="/admin/users/{{ user.id }}/delete" style="display:inline"
+                onsubmit="return confirm('Удалить пользователя {{ user.fio or user.max_user_id }}? Он сможет зарегистрироваться заново.');">
+            <button class="btn" type="submit" style="background:#991b1b">Удалить</button>
+          </form>
+        </td>
       </tr>
       {% endfor %}
     </tbody>

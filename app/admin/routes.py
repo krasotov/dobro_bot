@@ -142,7 +142,35 @@ async def users_page(
     users = result.scalars().all()
     return templates.TemplateResponse(
         "users.html",
-        _template_context(request, users=users),
+        _template_context(
+            request,
+            users=users,
+            success=request.query_params.get("success"),
+            error=request.query_params.get("error"),
+        ),
+    )
+
+
+@router.post("/users/{user_id}/delete")
+async def delete_user(
+    user_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    redirect = require_superadmin(request)
+    if redirect:
+        raise HTTPException(status_code=401)
+
+    from app.services.user_admin import delete_user_record
+
+    user = await delete_user_record(session, user_id)
+    if not user:
+        return RedirectResponse("/admin/users?error=Пользователь+не+найден", status_code=303)
+
+    label = user.fio or user.max_user_id
+    return RedirectResponse(
+        f"/admin/users?success=Пользователь+удалён:+{label}.+Может+зарегистрироваться+заново+в+боте.",
+        status_code=303,
     )
 
 
