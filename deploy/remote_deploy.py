@@ -17,7 +17,7 @@ REMOTE_DIR = "/opt/max_bot"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 SKIP_DIRS = {".venv", "__pycache__", ".git", "pgdata", "node_modules"}
-SKIP_FILES = {".DS_Store"}
+SKIP_FILES = {".DS_Store", ".env"}
 
 
 def should_skip(path: Path) -> bool:
@@ -80,8 +80,17 @@ def main() -> int:
     sftp.close()
     os.unlink(archive)
 
+    extract_cmd = (
+        f"mkdir -p {REMOTE_DIR} && "
+        f"ENV_BACKUP=$(mktemp) && ENV_SAVED=0; "
+        f"if [ -f {REMOTE_DIR}/.env ]; then cp {REMOTE_DIR}/.env \"$ENV_BACKUP\" && ENV_SAVED=1; fi; "
+        f"tar -xzf {remote_tar} -C {REMOTE_DIR}; "
+        f"if [ \"$ENV_SAVED\" = 1 ]; then cp \"$ENV_BACKUP\" {REMOTE_DIR}/.env; fi; "
+        f"rm -f \"$ENV_BACKUP\""
+    )
+
     commands = [
-        f"mkdir -p {REMOTE_DIR} && tar -xzf {remote_tar} -C {REMOTE_DIR}",
+        extract_cmd,
         f"rm -f {remote_tar}",
         "command -v docker >/dev/null || curl -fsSL https://get.docker.com | sh",
         "apt-get update -qq && apt-get install -y -qq certbot 2>/dev/null || true",
