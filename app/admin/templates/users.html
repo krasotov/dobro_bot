@@ -5,39 +5,52 @@
 {% if success %}<div class="card" style="background:#ecfdf5">{{ success }}</div>{% endif %}
 {% if error %}<div class="card" style="background:#fef2f2;color:#b91c1c">{{ error }}</div>{% endif %}
 <div class="card">
-  <p style="color:#4b5563;font-size:14px">
-    Удаление убирает запись из базы. Человек сможет снова нажать «Начать» в боте и пройти регистрацию с нуля
-    (например, если раньше указал неверные данные).
+  <p style="color:#4b5563;font-size:14px;margin-top:0">
+    Удаление убирает запись из базы. Человек сможет снова нажать «Начать» в боте и пройти регистрацию с нуля.
   </p>
-  <table>
-    <thead>
-      <tr>
-        <th>ID</th><th>MAX ID</th><th>ФИО</th><th>Дата рожд.</th><th>Адрес</th><th>Район</th><th>Телефон</th><th>Подтв.</th><th>Статус</th><th>Регистрация</th><th>Скрины</th><th></th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for user in users %}
-      <tr>
-        <td>{{ user.id }}</td>
-        <td>{{ user.max_user_id }}</td>
-        <td>{{ user.fio or "—" }}</td>
-        <td>{{ user.birth_date or "—" }}</td>
-        <td>{{ user.address_normalized or user.address or "—" }}</td>
-        <td>{{ user.district or "—" }}</td>
-        <td>{{ user.phone or "—" }}</td>
-        <td>{% if user.phone_verified %}да{% elif user.phone %}нет{% else %}—{% endif %}</td>
-        <td>{% if user.is_registered %}Зарегистрирован{% else %}{{ user.state.value }}{% endif %}</td>
-        <td>{{ user.registered_at or "—" }}</td>
-        <td>{{ user.screenshots|length }}</td>
-        <td>
-          <form method="post" action="/admin/users/{{ user.id }}/delete" style="display:inline"
-                onsubmit="return confirm('Удалить пользователя {{ user.fio or user.max_user_id }}? Он сможет зарегистрироваться заново.');">
-            <button class="btn" type="submit" style="background:#991b1b">Удалить</button>
-          </form>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th class="num">ID</th>
+          <th class="num">MAX ID</th>
+          <th>ФИО</th>
+          <th class="nowrap">Дата рожд.</th>
+          <th>Адрес</th>
+          <th>Район</th>
+          <th class="nowrap">Телефон</th>
+          <th class="nowrap">Подтв.</th>
+          <th>Статус</th>
+          <th class="nowrap">Регистрация</th>
+          <th class="num">Скр.</th>
+          <th class="nowrap"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for user in users %}
+        {% set address = user.address_normalized or user.address or "—" %}
+        <tr>
+          <td class="num">{{ user.id }}</td>
+          <td class="num">{{ user.max_user_id }}</td>
+          <td class="truncate" title="{{ user.fio or '' }}">{{ user.fio or "—" }}</td>
+          <td class="nowrap">{{ user.birth_date or "—" }}</td>
+          <td class="truncate" title="{{ address }}">{{ address }}</td>
+          <td class="truncate" title="{{ user.district or '' }}">{{ user.district or "—" }}</td>
+          <td class="nowrap">{{ user.phone or "—" }}</td>
+          <td class="nowrap">{% if user.phone_verified %}да{% elif user.phone %}нет{% else %}—{% endif %}</td>
+          <td class="nowrap">{% if user.is_registered %}OK{% else %}{{ user.state.value }}{% endif %}</td>
+          <td class="nowrap">{% if user.registered_at %}{{ user.registered_at.strftime('%d.%m.%Y') }}{% else %}—{% endif %}</td>
+          <td class="num">{{ user.screenshots|length }}</td>
+          <td class="nowrap">
+            <form method="post" action="/admin/users/{{ user.id }}/delete" style="margin:0"
+                  onsubmit="return confirm('Удалить пользователя {{ user.fio or user.max_user_id }}?');">
+              <button class="btn btn-sm" type="submit" style="background:#991b1b">Удалить</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endblock %}

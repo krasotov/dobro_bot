@@ -38,7 +38,8 @@
 </div>
 <div class="card">
   <h2>История</h2>
-  <table>
+  <div class="table-wrap">
+  <table class="data-table">
     <thead><tr><th>ID</th><th>Дата</th><th>Районы</th><th>Картинка</th><th>Источник</th><th>Получателей</th><th>Отправлено</th><th>Ошибок</th><th>Текст</th></tr></thead>
     <tbody>
       {% for b in broadcasts %}
@@ -56,5 +57,6 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 {% endblock %}
