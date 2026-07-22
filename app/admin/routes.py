@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-import csv
-import io
-from datetime import datetime
-
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
@@ -23,6 +19,7 @@ from app.models import AdminRole, AdminUser, Broadcast, NewsChannelSource, Scree
 from app.services.broadcast import encode_districts, send_broadcast
 from app.services.broadcast_media import upload_broadcast_image, validate_broadcast_image
 from app.services.channel_news import get_news_channel_source
+from app.services.user_export import build_registered_users_csv
 from app.utils.password import hash_password, verify_password
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -179,54 +176,9 @@ async def export_users(
     if redirect:
         raise HTTPException(status_code=401)
 
-    result = await session.execute(
-        select(User)
-        .options(selectinload(User.screenshots))
-        .where(User.is_registered.is_(True))
-        .order_by(User.registered_at.desc())
-    )
-    users = result.scalars().all()
-
-    output = io.StringIO()
-    writer = csv.writer(output, delimiter=";")
-    writer.writerow(
-        [
-            "ID",
-            "MAX user_id",
-            "ФИО",
-            "Дата рождения",
-            "Адрес",
-            "Адрес (как ввёл пользователь)",
-            "Район",
-            "Телефон",
-            "Телефон подтверждён",
-            "Дата регистрации",
-            "Скриншотов",
-            "Активен",
-        ]
-    )
-    for user in users:
-        writer.writerow(
-            [
-                user.id,
-                user.max_user_id,
-                user.fio or "",
-                user.birth_date or "",
-                user.address_normalized or user.address or "",
-                user.address or "",
-                user.district or "",
-                user.phone or "",
-                "да" if user.phone_verified else "нет",
-                user.registered_at.isoformat() if user.registered_at else "",
-                len(user.screenshots),
-                "да" if user.is_active else "нет",
-            ]
-        )
-
-    output.seek(0)
-    filename = f"users_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+    content, filename = await build_registered_users_csv(session)
     return StreamingResponse(
-        iter([output.getvalue().encode("utf-8-sig")]),
+        iter([content]),
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

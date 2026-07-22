@@ -4,18 +4,22 @@ import logging
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import settings
 from app.database import async_session, get_session
 from app.internal.auth import require_internal_api_token
-from app.models import Broadcast, NewsChannelSource, Screenshot, User
+from app.models import AdminRole, AdminUser, Broadcast, NewsChannelSource, Screenshot, User
 from app.services.broadcast import encode_districts, send_broadcast
 from app.services.broadcast_media import upload_broadcast_image, validate_broadcast_image
 from app.services.channel_news import get_news_channel_source
 from app.services.user_admin import delete_user_record
+from app.services.user_export import build_registered_users_csv
+from app.utils.password import hash_password
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +140,106 @@ async def list_users(
             }
         )
     return {"users": users}
+
+
+@router.get("/users/export")
+async def export_users(
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+) -> StreamingResponse:
+    content, filename = await build_registered_users_csv(session)
+    return StreamingResponse(
+        iter([content]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+class CreateStaffBody(BaseModel):
+    username: str = Field(min_length=3, max_length=64)
+    password: str = Field(min_length=6, max_length=128)
+    displayName: str | None = Field(default=None, max_length=255)
+
+
+@router.get("/staff")
+async def list_staff(
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    result = await session.execute(select(AdminUser).order_by(AdminUser.created_at.desc()))
+    staff = []
+    for member in result.scalars().all():
+        staff.append(
+            {
+                "id": member.id,
+                "username": member.username,
+                "displayName": member.display_name,
+                "role": member.role.value,
+                "isActive": member.is_active,
+                "createdAt": _iso(member.created_at),
+            }
+        )
+    return {"staff": staff}
+
+
+@router.post("/staff")
+async def create_staff(
+    body: CreateStaffBody,
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    username = body.username.strip().lower()
+    display_name = (body.displayName or "").strip() or None
+
+    if username == settings.admin_username.lower():
+        raise HTTPException(status_code=400, detail="Этот логин зарезервирован")
+
+    existing = await session.scalar(select(AdminUser.id).where(AdminUser.username == username))
+    if existing:
+        raise HTTPException(status_code=409, detail="Пользователь с таким логином уже есть")
+
+    admin_user = AdminUser(
+        username=username,
+        password_hash=hash_password(body.password),
+        display_name=display_name,
+        role=AdminRole.BROADCASTER,
+    )
+    session.add(admin_user)
+    await session.commit()
+    await session.refresh(admin_user)
+
+    return {
+        "success": True,
+        "staff": {
+            "id": admin_user.id,
+            "username": admin_user.username,
+            "displayName": admin_user.display_name,
+            "role": admin_user.role.value,
+            "isActive": admin_user.is_active,
+            "createdAt": _iso(admin_user.created_at),
+        },
+    }
+
+
+@router.post("/staff/{staff_id}/toggle")
+async def toggle_staff(
+    staff_id: int,
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    admin_user = await session.get(AdminUser, staff_id)
+    if not admin_user:
+        raise HTTPException(status_code=404, detail="Operator not found")
+
+    admin_user.is_active = not admin_user.is_active
+    await session.commit()
+    await session.refresh(admin_user)
+
+    return {
+        "success": True,
+        "isActive": admin_user.is_active,
+        "staffId": admin_user.id,
+    }
 
 
 @router.delete("/users/{user_id}")
