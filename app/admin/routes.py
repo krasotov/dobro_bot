@@ -167,11 +167,7 @@ async def delete_user(
     if not user:
         return RedirectResponse("/admin/users?error=Пользователь+не+найден", status_code=303)
 
-    label = user.fio or user.max_user_id
-    return RedirectResponse(
-        f"/admin/users?success=Пользователь+удалён:+{label}.+Может+зарегистрироваться+заново+в+боте.",
-        status_code=303,
-    )
+    return RedirectResponse("/admin/users?success=Пользователь+удалён.+Можно+зарегистрироваться+заново+в+боте.", status_code=303)
 
 
 @router.get("/users/export")
