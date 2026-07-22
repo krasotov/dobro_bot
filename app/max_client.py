@@ -98,17 +98,39 @@ class MaxClient:
         text: str,
         *,
         attachments: list[dict[str, Any]] | None = None,
+        link: dict[str, Any] | None = None,
         format: str = "html",
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"text": text, "format": format}
         if attachments:
             body["attachments"] = attachments
+        if link:
+            body["link"] = link
         return await self._request(
             "POST",
             "/messages",
             params={"user_id": user_id},
             json=body,
         )
+
+    async def forward_message(self, user_id: int, forward_mid: str) -> dict[str, Any]:
+        last_error: MaxApiError | None = None
+        for link in (
+            {"type": "forward", "mid": forward_mid},
+            {"type": "forward", "message_id": forward_mid},
+        ):
+            try:
+                return await self._request(
+                    "POST",
+                    "/messages",
+                    params={"user_id": user_id},
+                    json={"text": "", "link": link},
+                )
+            except MaxApiError as exc:
+                last_error = exc
+        if last_error:
+            raise last_error
+        raise MaxApiError(500, "Failed to forward message")
 
     async def send_message_with_image(
         self,

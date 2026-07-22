@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -9,6 +10,29 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.max_client import MaxApiError, max_client
 from app.models import Broadcast, BroadcastDelivery, User
+
+logger = logging.getLogger(__name__)
+
+
+async def _deliver_broadcast_message(user: User, broadcast: Broadcast) -> None:
+    if broadcast.auto_from_channel and broadcast.source_message_id:
+        try:
+            await max_client.forward_message(user.max_user_id, broadcast.source_message_id)
+            return
+        except MaxApiError as exc:
+            logger.warning(
+                "Forward failed for user %s broadcast %s, fallback to copy: %s",
+                user.max_user_id,
+                broadcast.id,
+                exc.message[:300],
+            )
+
+    await max_client.send_message_with_image(
+        user.max_user_id,
+        broadcast.text,
+        image_token=broadcast.image_token,
+        image_url=broadcast.image_url,
+    )
 
 
 async def send_broadcast(
@@ -42,12 +66,7 @@ async def send_broadcast(
         await session.flush()
 
         try:
-            await max_client.send_message_with_image(
-                user.max_user_id,
-                broadcast.text,
-                image_token=broadcast.image_token,
-                image_url=broadcast.image_url,
-            )
+            await _deliver_broadcast_message(user, broadcast)
             delivery.status = "sent"
             delivery.sent_at = datetime.now(timezone.utc)
             sent += 1

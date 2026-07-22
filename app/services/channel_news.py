@@ -62,9 +62,6 @@ def extract_image_payload(attachments: list[dict[str, Any]]) -> tuple[str | None
 
 
 async def bind_channel_on_bot_added(session: AsyncSession, update: dict[str, Any]) -> None:
-    if not update.get("is_channel"):
-        return
-
     chat_id = update.get("chat_id")
     if chat_id is None:
         return
@@ -89,7 +86,7 @@ async def bind_channel_on_bot_added(session: AsyncSession, update: dict[str, Any
 
     source.chat_id = int(chat_id)
     source.is_enabled = True
-    logger.info("News source channel bound to chat_id=%s", chat_id)
+    logger.info("News source bound to chat_id=%s (channel=%s)", chat_id, update.get("is_channel"))
 
 
 async def is_channel_source_message(session: AsyncSession, update: dict[str, Any]) -> bool:
