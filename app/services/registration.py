@@ -36,6 +36,7 @@ from app.texts import (
     STATUS_REGISTERED,
     WELCOME_TEXT,
 )
+from app.services.admspgo_directory import try_directory_command
 from app.services.appeal_flow import (
     APPEAL_FLOW_NONE,
     handle_appeal_flow_message,
@@ -176,6 +177,9 @@ async def handle_message_created(session: AsyncSession, update: dict[str, Any]) 
         text[:50] if text else "",
         [a.get("type") for a in attachments],
     )
+
+    if text and await try_directory_command(user.max_user_id, text):
+        return
 
     if user.is_registered:
         in_appeal = (user.appeal_flow_state or APPEAL_FLOW_NONE) != APPEAL_FLOW_NONE
