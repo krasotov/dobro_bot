@@ -36,7 +36,12 @@ from app.texts import (
     STATUS_REGISTERED,
     WELCOME_TEXT,
 )
-from app.services.appeal_flow import handle_appeal_flow_message, send_appeal_hint, try_start_appeal_flow
+from app.services.appeal_flow import (
+    APPEAL_FLOW_NONE,
+    handle_appeal_flow_message,
+    send_appeal_hint,
+    try_start_appeal_flow,
+)
 from app.utils.birth_date import parse_birth_date
 from app.utils.contact import extract_contact_phone
 
@@ -173,12 +178,14 @@ async def handle_message_created(session: AsyncSession, update: dict[str, Any]) 
     )
 
     if user.is_registered:
-        if _has_image_attachment(attachments):
+        in_appeal = (user.appeal_flow_state or APPEAL_FLOW_NONE) != APPEAL_FLOW_NONE
+        if in_appeal or text or attachments:
+            if await handle_appeal_flow_message(session, user, text, attachments):
+                return
+        if not in_appeal and _has_image_attachment(attachments):
             await _save_screenshot(session, user, message, attachments)
             return
         if text:
-            if await handle_appeal_flow_message(session, user, text):
-                return
             await _handle_registered_text(session, user, text)
         return
 

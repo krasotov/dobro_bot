@@ -49,6 +49,8 @@ class User(Base):
 
     appeal_flow_state: Mapped[str | None] = mapped_column(String(16), default="none")
     appeal_draft_subject: Mapped[str | None] = mapped_column(String(200))
+    appeal_draft_message: Mapped[str | None] = mapped_column(Text)
+    appeal_draft_attachments: Mapped[str | None] = mapped_column(Text)
 
     consent_given: Mapped[bool] = mapped_column(Boolean, default=False)
     consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

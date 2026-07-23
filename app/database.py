@@ -34,6 +34,8 @@ MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS ix_users_district ON users (district)",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS appeal_flow_state VARCHAR(16) DEFAULT 'none'",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS appeal_draft_subject VARCHAR(200)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS appeal_draft_message TEXT",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS appeal_draft_attachments TEXT",
 ]
 
 
