@@ -2,7 +2,7 @@ import enum
 import json
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Enum, ForeignKey, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -31,7 +31,12 @@ class User(Base):
     max_name: Mapped[str | None] = mapped_column(String(255))
 
     state: Mapped[RegistrationState] = mapped_column(
-        Enum(RegistrationState), default=RegistrationState.NEW
+        Enum(
+            RegistrationState,
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+            name="registrationstate",
+        ),
+        default=RegistrationState.NEW,
     )
 
     fio: Mapped[str | None] = mapped_column(String(500))
@@ -44,6 +49,12 @@ class User(Base):
     settlement: Mapped[str | None] = mapped_column(String(255))
     address_qc: Mapped[int | None] = mapped_column(Integer)
 
+    address_street: Mapped[str | None] = mapped_column(String(255))
+    address_house: Mapped[str | None] = mapped_column(String(64))
+    address_apartment: Mapped[str | None] = mapped_column(String(32))
+    address_latitude: Mapped[float | None] = mapped_column(Float)
+    address_longitude: Mapped[float | None] = mapped_column(Float)
+
     phone: Mapped[str | None] = mapped_column(String(32), index=True)
     phone_verified: Mapped[bool] = mapped_column(Boolean, default=False)
 
@@ -51,6 +62,15 @@ class User(Base):
     appeal_draft_subject: Mapped[str | None] = mapped_column(String(200))
     appeal_draft_message: Mapped[str | None] = mapped_column(Text)
     appeal_draft_attachments: Mapped[str | None] = mapped_column(Text)
+    appeal_draft_category: Mapped[str | None] = mapped_column(String(16), default="general")
+
+    profile_flow_state: Mapped[str | None] = mapped_column(String(16), default="none")
+    topic_subscriptions: Mapped[str | None] = mapped_column(Text)
+
+    pending_screenshot_broadcast_id: Mapped[int | None] = mapped_column(
+        ForeignKey("broadcasts.id"), nullable=True, index=True
+    )
+    pending_poll_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     consent_given: Mapped[bool] = mapped_column(Boolean, default=False)
     consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -71,6 +91,22 @@ class User(Base):
         back_populates="user"
     )
 
+    def get_topic_subscription_list(self) -> list[str] | None:
+        """None = подписан на все темы (legacy / по умолчанию)."""
+        if self.topic_subscriptions is None:
+            return None
+        try:
+            data = json.loads(self.topic_subscriptions)
+            if isinstance(data, list):
+                return [str(x) for x in data if x]
+            return []
+        except json.JSONDecodeError:
+            return []
+
+    def set_topic_subscription_list(self, slugs: list[str]) -> None:
+        cleaned = [s.strip() for s in slugs if s and s.strip()]
+        self.topic_subscriptions = json.dumps(cleaned, ensure_ascii=False)
+
 
 class Broadcast(Base):
     __tablename__ = "broadcasts"
@@ -78,7 +114,9 @@ class Broadcast(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     text: Mapped[str] = mapped_column(Text)
     request_screenshot: Mapped[bool] = mapped_column(Boolean, default=False)
+    poll_id: Mapped[str | None] = mapped_column(String(64), index=True)
     districts: Mapped[str | None] = mapped_column(Text)
+    topics: Mapped[str | None] = mapped_column(Text)
     image_token: Mapped[str | None] = mapped_column(String(512))
     image_url: Mapped[str | None] = mapped_column(Text)
     image_filename: Mapped[str | None] = mapped_column(String(255))
@@ -100,6 +138,15 @@ class Broadcast(Base):
             return []
         try:
             data = json.loads(self.districts)
+            return [str(x) for x in data if x]
+        except json.JSONDecodeError:
+            return []
+
+    def get_topic_list(self) -> list[str]:
+        if not self.topics:
+            return []
+        try:
+            data = json.loads(self.topics)
             return [str(x) for x in data if x]
         except json.JSONDecodeError:
             return []
@@ -162,6 +209,7 @@ class Screenshot(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     broadcast_id: Mapped[int | None] = mapped_column(ForeignKey("broadcasts.id"), index=True)
+    poll_id: Mapped[str | None] = mapped_column(String(64), index=True)
     file_url: Mapped[str | None] = mapped_column(Text)
     file_token: Mapped[str | None] = mapped_column(String(512))
     message_id: Mapped[str | None] = mapped_column(String(128))

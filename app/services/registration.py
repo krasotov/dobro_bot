@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -9,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.max_client import consent_keyboard, contact_keyboard, max_client
+from app.max_client import consent_keyboard, contact_keyboard, main_menu_keyboard, max_client
 from app.models import RegistrationState, Screenshot, User
 from app.services.address import apply_address_to_user
 from app.texts import (
@@ -26,6 +25,7 @@ from app.texts import (
     INVALID_BIRTH_DATE,
     INVALID_FIO,
     INVALID_PHONE,
+    MENU_GUEST,
     PHONE_DUPLICATE,
     PHONE_NOTE_UNVERIFIED,
     PHONE_NOTE_VERIFIED,
@@ -33,41 +33,32 @@ from app.texts import (
     REGISTRATION_COMPLETE,
     SCREENSHOT_NOT_REGISTERED,
     SCREENSHOT_RECEIVED,
-    STATUS_REGISTERED,
     WELCOME_TEXT,
 )
 from app.services.admspgo_directory import try_directory_command
+from app.services.bot_menu import send_main_menu, try_handle_menu_callback
+from app.services.event_flow import try_handle_event_callback
+from app.services.poll_flow import try_handle_poll_callback
+from app.services.topic_subscriptions import ensure_default_subscriptions, try_handle_topic_callback
+from app.services.profile_flow import (
+    handle_profile_flow_message,
+    in_profile_flow,
+    send_profile_or_block,
+    try_handle_profile_callback,
+)
 from app.services.appeal_flow import (
+    APPEAL_CATEGORY_UTILITIES,
     APPEAL_FLOW_NONE,
     handle_appeal_flow_message,
     send_appeal_hint,
+    try_handle_appeal_callback,
     try_start_appeal_flow,
 )
 from app.utils.birth_date import parse_birth_date
 from app.utils.contact import extract_contact_phone
+from app.utils.user_input import is_valid_address, is_valid_fio, is_valid_phone_text, normalize_phone
 
 logger = logging.getLogger(__name__)
-
-
-def normalize_phone(phone: str) -> str:
-    digits = re.sub(r"\D", "", phone)
-    if len(digits) == 11 and digits.startswith("8"):
-        digits = "7" + digits[1:]
-    return digits
-
-
-def is_valid_fio(value: str) -> bool:
-    parts = [p for p in value.strip().split() if p]
-    return len(parts) >= 2 and len(value.strip()) >= 5
-
-
-def is_valid_address(value: str) -> bool:
-    return len(value.strip()) >= 10
-
-
-def is_valid_phone_text(value: str) -> bool:
-    digits = normalize_phone(value)
-    return len(digits) in {10, 11}
 
 
 async def get_or_create_user(session: AsyncSession, update: dict[str, Any]) -> User | None:
@@ -104,6 +95,7 @@ async def get_or_create_user(session: AsyncSession, update: dict[str, Any]) -> U
 async def start_registration(session: AsyncSession, user: User) -> None:
     if user.is_registered:
         await max_client.send_message(user.max_user_id, ALREADY_REGISTERED)
+        await send_main_menu(user.max_user_id, registered=True)
         return
 
     user.state = RegistrationState.AWAITING_CONSENT
@@ -158,6 +150,24 @@ async def handle_callback(session: AsyncSession, update: dict[str, Any]) -> None
         await max_client.send_message(user.max_user_id, ASK_PHONE_MANUAL)
         return
 
+    if await try_handle_poll_callback(session, user, payload):
+        return
+
+    if await try_handle_event_callback(session, user, payload):
+        return
+
+    if await try_handle_topic_callback(session, user, payload):
+        return
+
+    if await try_handle_profile_callback(session, user, payload):
+        return
+
+    if await try_handle_appeal_callback(session, user, payload):
+        return
+
+    if await try_handle_menu_callback(session, user, payload):
+        return
+
 
 async def handle_message_created(session: AsyncSession, update: dict[str, Any]) -> None:
     message = update.get("message") or {}
@@ -179,14 +189,34 @@ async def handle_message_created(session: AsyncSession, update: dict[str, Any]) 
     )
 
     if text and await try_directory_command(user.max_user_id, text):
+        if user.is_registered:
+            await send_main_menu(user.max_user_id, registered=True)
+        else:
+            await send_main_menu(user.max_user_id, registered=False)
         return
+
+    if text:
+        cmd = text.lower().strip()
+        if cmd in {"меню", "menu"}:
+            await send_main_menu(user.max_user_id, registered=user.is_registered)
+            return
+        if cmd in {"помощь", "help"} and not user.is_registered:
+            await max_client.send_message(
+                user.max_user_id,
+                MENU_GUEST,
+                attachments=main_menu_keyboard(registered=False),
+            )
+            return
 
     if user.is_registered:
         in_appeal = (user.appeal_flow_state or APPEAL_FLOW_NONE) != APPEAL_FLOW_NONE
+        if in_profile_flow(user) and (text or attachments):
+            if await handle_profile_flow_message(session, user, text, attachments):
+                return
         if in_appeal or text or attachments:
             if await handle_appeal_flow_message(session, user, text, attachments):
                 return
-        if not in_appeal and _has_image_attachment(attachments):
+        if not in_appeal and not in_profile_flow(user) and _has_image_attachment(attachments):
             await _save_screenshot(session, user, message, attachments)
             return
         if text:
@@ -204,6 +234,10 @@ async def handle_message_created(session: AsyncSession, update: dict[str, Any]) 
             await max_client.send_message(
                 user.max_user_id, CONTACT_PARSE_FAILED, attachments=contact_keyboard()
             )
+            return
+
+        if text and is_valid_phone_text(text):
+            await _complete_phone_step(session, user, text, verified=False)
             return
 
         await max_client.send_message(user.max_user_id, PHONE_REQUIRED, attachments=contact_keyboard())
@@ -262,16 +296,43 @@ async def _process_address_input(session: AsyncSession, user: User, raw_address:
 
 async def _handle_registered_text(session: AsyncSession, user: User, text: str) -> None:
     command = text.lower().strip()
-    if command in {"статус", "status"}:
-        await max_client.send_message(user.max_user_id, STATUS_REGISTERED)
+    if command in {"меню", "menu"}:
+        await send_main_menu(user.max_user_id, registered=True)
+        return
+    if command in {"мероприятия", "мероприятие", "events", "event"}:
+        from app.services.event_flow import send_events_list
+
+        await send_events_list(user.max_user_id)
+        return
+    if command in {"опрос", "опросы", "poll", "polls"}:
+        from app.services.poll_flow import send_polls_list
+
+        await send_polls_list(user.max_user_id)
+        return
+    if command in {"подписки", "subscriptions", "topics"}:
+        from app.services.topic_subscriptions import send_subscriptions_panel
+
+        await send_subscriptions_panel(session, user)
+        return
+    if command in {"статус", "status", "профиль", "profile"}:
+        in_appeal = (user.appeal_flow_state or APPEAL_FLOW_NONE) != APPEAL_FLOW_NONE
+        await send_profile_or_block(session, user, in_appeal=in_appeal)
         return
     if command in {"обращение", "appeal", "заявка"}:
         await try_start_appeal_flow(session, user)
         return
+    if command in {"жкх", "jkh", "utilities", "коммуналка"}:
+        await try_start_appeal_flow(session, user, category=APPEAL_CATEGORY_UTILITIES)
+        return
     if command in {"помощь", "help"}:
-        await max_client.send_message(user.max_user_id, HELP_REGISTERED)
+        await max_client.send_message(
+            user.max_user_id,
+            HELP_REGISTERED,
+            attachments=main_menu_keyboard(registered=True),
+        )
         return
     await send_appeal_hint(user)
+    await send_main_menu(user.max_user_id, registered=True)
 
 
 async def _complete_phone_step(
@@ -298,6 +359,7 @@ async def _complete_phone_step(
     user.state = RegistrationState.COMPLETED
     user.is_registered = True
     user.registered_at = datetime.now(timezone.utc)
+    await ensure_default_subscriptions(user)
     await session.commit()
 
     phone_note = PHONE_NOTE_VERIFIED if verified else PHONE_NOTE_UNVERIFIED
@@ -307,6 +369,7 @@ async def _complete_phone_step(
             fio=user.fio or "гражданин",
             phone_note=phone_note,
         ),
+        attachments=main_menu_keyboard(registered=True),
     )
 
 
@@ -338,10 +401,14 @@ async def _save_screenshot(
 
     screenshot = Screenshot(
         user_id=user.id,
+        broadcast_id=user.pending_screenshot_broadcast_id,
+        poll_id=user.pending_poll_id,
         file_url=file_url,
         file_token=file_token,
         message_id=str(message.get("message_id") or message.get("id") or ""),
     )
+    user.pending_screenshot_broadcast_id = None
+    user.pending_poll_id = None
     session.add(screenshot)
     await session.commit()
     await max_client.send_message(user.max_user_id, SCREENSHOT_RECEIVED)
