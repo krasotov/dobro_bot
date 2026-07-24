@@ -47,7 +47,7 @@ def _format_event_detail(event: dict[str, Any]) -> str:
     parts = [f"<b>{title}</b>", f"Когда: {when}", f"Где: {place}", seats]
     if summary:
         parts.append("")
-        parts.append(summary[:600])
+        parts.append(summary[:2000])
     return "\n".join(parts)
 
 
@@ -110,7 +110,7 @@ async def try_handle_event_callback(
                 user.max_user_id,
                 detail_text,
                 image_url=image_url.strip(),
-                attachments=event_detail_keyboard(post_id),
+                extra_attachments=event_detail_keyboard(post_id),
             )
         else:
             await max_client.send_message(

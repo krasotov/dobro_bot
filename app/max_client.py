@@ -140,8 +140,9 @@ class MaxClient:
         image_token: str | None = None,
         image_url: str | None = None,
         format: str = "html",
+        extra_attachments: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        attachments = None
+        attachments: list[dict[str, Any]] | None = None
         if image_token or image_url:
             payload: dict[str, Any] = {}
             if image_token:
@@ -149,6 +150,8 @@ class MaxClient:
             elif image_url:
                 payload["url"] = image_url
             attachments = [{"type": "image", "payload": payload}]
+        if extra_attachments:
+            attachments = (attachments or []) + extra_attachments
 
         last_error: MaxApiError | None = None
         for attempt in range(4):
@@ -247,3 +250,195 @@ def contact_keyboard() -> list[dict[str, Any]]:
             },
         }
     ]
+
+
+def utilities_disclaimer_keyboard() -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "inline_keyboard",
+            "payload": {
+                "buttons": [
+                    [{"type": "callback", "text": "Продолжить", "payload": "utilities_continue"}],
+                    [{"type": "callback", "text": "Отмена", "payload": "utilities_cancel"}],
+                ]
+            },
+        }
+    ]
+
+
+def profile_edit_keyboard() -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "inline_keyboard",
+            "payload": {
+                "buttons": [
+                    [
+                        {"type": "callback", "text": "ФИО", "payload": "profile_edit_fio"},
+                        {"type": "callback", "text": "Дата рожд.", "payload": "profile_edit_birth"},
+                    ],
+                    [
+                        {"type": "callback", "text": "Адрес", "payload": "profile_edit_address"},
+                        {"type": "callback", "text": "Телефон", "payload": "profile_edit_phone"},
+                    ],
+                    [{"type": "callback", "text": "В меню", "payload": "menu_open"}],
+                ]
+            },
+        }
+    ]
+
+
+def main_menu_keyboard(*, registered: bool) -> list[dict[str, Any]]:
+    """Главное меню бота (inline-кнопки под сообщением)."""
+    buttons: list[list[dict[str, Any]]] = [
+        [{"type": "callback", "text": "Справочник", "payload": "menu_directory"}],
+    ]
+    if registered:
+        buttons.append(
+            [
+                {"type": "callback", "text": "Обращение", "payload": "menu_appeal"},
+                {"type": "callback", "text": "ЖКХ", "payload": "menu_utilities"},
+            ]
+        )
+        buttons.append(
+            [
+                {"type": "callback", "text": "Мероприятия", "payload": "menu_events"},
+                {"type": "callback", "text": "Опросы", "payload": "menu_polls"},
+            ]
+        )
+        buttons.append(
+            [
+                {"type": "callback", "text": "Подписки", "payload": "menu_subscriptions"},
+            ]
+        )
+        buttons.append(
+            [
+                {"type": "callback", "text": "Помощь", "payload": "menu_help"},
+                {"type": "callback", "text": "Профиль", "payload": "menu_profile"},
+            ]
+        )
+    return [
+        {
+            "type": "inline_keyboard",
+            "payload": {"buttons": buttons},
+        }
+    ]
+
+
+def topic_subscriptions_keyboard(
+    topics: list[dict[str, Any]],
+    subscribed: set[str],
+) -> list[dict[str, Any]]:
+    rows: list[list[dict[str, Any]]] = []
+    row: list[dict[str, Any]] = []
+    for topic in topics:
+        slug = str(topic.get("slug") or "")
+        title = str(topic.get("title") or slug)
+        if not slug:
+            continue
+        mark = "✓ " if slug in subscribed else ""
+        row.append(
+            {
+                "type": "callback",
+                "text": f"{mark}{title}"[:64],
+                "payload": f"topic_toggle:{slug}",
+            }
+        )
+        if len(row) >= 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([{"type": "callback", "text": "← Меню", "payload": "menu_open"}])
+    return [{"type": "inline_keyboard", "payload": {"buttons": rows}}]
+
+
+def events_list_keyboard(events: list[dict]) -> list[dict[str, Any]]:
+    rows: list[list[dict[str, Any]]] = []
+    for event in events:
+        title = str(event.get("title") or "Мероприятие")[:64]
+        post_id = str(event.get("id") or "")
+        if not post_id:
+            continue
+        rows.append([{"type": "callback", "text": title, "payload": f"event_pick:{post_id}"}])
+    rows.append([{"type": "callback", "text": "← Меню", "payload": "menu_open"}])
+    return [{"type": "inline_keyboard", "payload": {"buttons": rows}}]
+
+
+def event_detail_keyboard(post_id: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "inline_keyboard",
+            "payload": {
+                "buttons": [
+                    [{"type": "callback", "text": "Записаться", "payload": f"event_register:{post_id}"}],
+                    [
+                        {"type": "callback", "text": "← К списку", "payload": "events_back"},
+                        {"type": "callback", "text": "Меню", "payload": "menu_open"},
+                    ],
+                ]
+            },
+        }
+    ]
+
+
+def _poll_vote_buttons(
+    poll_id: str,
+    options: list[dict[str, Any]],
+    *,
+    broadcast_id: int | None,
+) -> list[list[dict[str, Any]]]:
+    bid = str(broadcast_id or 0)
+    rows: list[list[dict[str, Any]]] = []
+    for opt in options:
+        key = str(opt.get("key") or "").strip()
+        label = str(opt.get("label") or key).strip()
+        if not key or not label:
+            continue
+        rows.append(
+            [
+                {
+                    "type": "callback",
+                    "text": label[:48],
+                    "payload": f"poll_vote:{poll_id}:{key}:{bid}",
+                }
+            ]
+        )
+    return rows
+
+
+def poll_vote_keyboard(
+    poll_id: str,
+    options: list[dict[str, Any]],
+    *,
+    broadcast_id: int | None,
+) -> list[dict[str, Any]]:
+    rows = _poll_vote_buttons(poll_id, options, broadcast_id=broadcast_id)
+    return [{"type": "inline_keyboard", "payload": {"buttons": rows}}]
+
+
+def polls_list_keyboard(polls: list[dict]) -> list[dict[str, Any]]:
+    rows: list[list[dict[str, Any]]] = []
+    for poll in polls:
+        title = str(poll.get("title") or "Опрос")[:48]
+        poll_id = str(poll.get("id") or "")
+        if not poll_id:
+            continue
+        rows.append([{"type": "callback", "text": title, "payload": f"poll_pick:{poll_id}"}])
+    rows.append([{"type": "callback", "text": "← Меню", "payload": "menu_open"}])
+    return [{"type": "inline_keyboard", "payload": {"buttons": rows}}]
+
+
+def poll_detail_keyboard(
+    poll_id: str,
+    options: list[dict[str, Any]],
+    *,
+    broadcast_id: int | None,
+) -> list[dict[str, Any]]:
+    rows = _poll_vote_buttons(poll_id, options, broadcast_id=broadcast_id)
+    rows.append(
+        [
+            {"type": "callback", "text": "← К списку", "payload": "polls_back"},
+            {"type": "callback", "text": "Меню", "payload": "menu_open"},
+        ]
+    )
+    return [{"type": "inline_keyboard", "payload": {"buttons": rows}}]
