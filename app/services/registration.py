@@ -40,6 +40,7 @@ from app.services.bot_menu import send_main_menu, try_handle_menu_callback
 from app.services.event_flow import try_handle_event_callback
 from app.services.poll_flow import try_handle_poll_callback
 from app.services.topic_subscriptions import ensure_default_subscriptions, try_handle_topic_callback
+from app.services.audience_roles import ensure_default_audience_roles
 from app.services.profile_flow import (
     handle_profile_flow_message,
     in_profile_flow,
@@ -359,6 +360,7 @@ async def _complete_phone_step(
     user.state = RegistrationState.COMPLETED
     user.is_registered = True
     user.registered_at = datetime.now(timezone.utc)
+    ensure_default_audience_roles(user)
     await ensure_default_subscriptions(user)
     await session.commit()
 

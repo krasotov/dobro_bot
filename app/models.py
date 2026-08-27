@@ -66,6 +66,7 @@ class User(Base):
 
     profile_flow_state: Mapped[str | None] = mapped_column(String(16), default="none")
     topic_subscriptions: Mapped[str | None] = mapped_column(Text)
+    audience_roles: Mapped[str | None] = mapped_column(Text)
 
     pending_screenshot_broadcast_id: Mapped[int | None] = mapped_column(
         ForeignKey("broadcasts.id"), nullable=True, index=True
@@ -117,6 +118,7 @@ class Broadcast(Base):
     poll_id: Mapped[str | None] = mapped_column(String(64), index=True)
     districts: Mapped[str | None] = mapped_column(Text)
     topics: Mapped[str | None] = mapped_column(Text)
+    audience_roles: Mapped[str | None] = mapped_column(Text)
     image_token: Mapped[str | None] = mapped_column(String(512))
     image_url: Mapped[str | None] = mapped_column(Text)
     image_filename: Mapped[str | None] = mapped_column(String(255))
@@ -150,6 +152,17 @@ class Broadcast(Base):
             return [str(x) for x in data if x]
         except json.JSONDecodeError:
             return []
+
+    def get_audience_role_list(self) -> list[str]:
+        if not self.audience_roles:
+            return []
+        try:
+            data = json.loads(self.audience_roles)
+            if isinstance(data, list):
+                return [str(x) for x in data if x]
+        except json.JSONDecodeError:
+            pass
+        return []
 
 
 class BroadcastDelivery(Base):

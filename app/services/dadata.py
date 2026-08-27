@@ -25,6 +25,9 @@ class NormalizedAddress:
     settlement: str | None
     street: str | None
     house: str | None
+    apartment: str | None
+    latitude: float | None
+    longitude: float | None
     quality_code: int | None
 
 
@@ -53,8 +56,20 @@ def _from_dadata_data(raw: str, data: dict[str, Any], *, normalized: str | None 
         settlement=(data.get("settlement") or "").strip() or None,
         street=(data.get("street_with_type") or data.get("street") or "").strip() or None,
         house=(data.get("house") or "").strip() or None,
+        apartment=(data.get("flat") or data.get("room") or "").strip() or None,
+        latitude=_geo_float(data.get("geo_lat")),
+        longitude=_geo_float(data.get("geo_lon")),
         quality_code=qc,
     )
+
+
+def _geo_float(value: object) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 async def _normalize_via_clean(raw: str, headers: dict[str, str]) -> NormalizedAddress | None:
@@ -109,6 +124,9 @@ async def normalize_address(raw_address: str) -> NormalizedAddress:
         settlement=None,
         street=None,
         house=None,
+        apartment=None,
+        latitude=None,
+        longitude=None,
         quality_code=None,
     )
 

@@ -19,6 +19,11 @@ def apply_normalized_address(user: User, normalized: NormalizedAddress) -> None:
     user.region = normalized.region
     user.city = normalized.city
     user.settlement = normalized.settlement
+    user.address_street = normalized.street
+    user.address_house = normalized.house
+    user.address_apartment = normalized.apartment
+    user.address_latitude = normalized.latitude
+    user.address_longitude = normalized.longitude
     user.address_qc = normalized.quality_code
 
 

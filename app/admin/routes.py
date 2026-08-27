@@ -17,6 +17,12 @@ from app.admin.auth import (
 from app.database import async_session, get_session
 from app.models import AdminRole, AdminUser, Broadcast, NewsChannelSource, Screenshot, User
 from app.services.broadcast import encode_districts, send_broadcast
+from app.services.audience_roles import (
+    AUDIENCE_ROLES,
+    audience_role_title,
+    encode_audience_roles,
+    parse_audience_roles,
+)
 from app.services.broadcast_media import upload_broadcast_image, validate_broadcast_image
 from app.services.channel_news import get_news_channel_source
 from app.services.user_export import build_registered_users_csv
@@ -142,10 +148,39 @@ async def users_page(
         _template_context(
             request,
             users=users,
+            audience_roles=AUDIENCE_ROLES,
+            audience_role_title=audience_role_title,
+            parse_audience_roles=parse_audience_roles,
             success=request.query_params.get("success"),
             error=request.query_params.get("error"),
         ),
     )
+
+
+@router.post("/users/{user_id}/roles")
+async def update_user_roles(
+    user_id: int,
+    request: Request,
+    audience_roles: list[str] = Form(default=[]),
+    session: AsyncSession = Depends(get_session),
+):
+    redirect = require_superadmin(request)
+    if redirect:
+        raise HTTPException(status_code=401)
+
+    user = await session.get(User, user_id)
+    if not user:
+        return RedirectResponse("/admin/users?error=Пользователь+не+найден", status_code=303)
+
+    encoded = encode_audience_roles(audience_roles)
+    if not encoded:
+        return RedirectResponse(
+            "/admin/users?error=Выберите+хотя+бы+одну+группу",
+            status_code=303,
+        )
+    user.audience_roles = encoded
+    await session.commit()
+    return RedirectResponse("/admin/users?success=Группы+пользователя+обновлены", status_code=303)
 
 
 @router.post("/users/{user_id}/delete")
@@ -204,6 +239,8 @@ async def broadcasts_page(
             request,
             broadcasts=broadcasts,
             districts=districts,
+            audience_roles=AUDIENCE_ROLES,
+            audience_role_title=audience_role_title,
             error=request.query_params.get("error"),
         ),
     )
@@ -216,6 +253,7 @@ async def create_broadcast(
     text: str = Form(...),
     request_screenshot: bool = Form(False),
     districts: list[str] = Form(default=[]),
+    audience_roles: list[str] = Form(default=[]),
     image: UploadFile | None = File(None),
     session: AsyncSession = Depends(get_session),
 ):
@@ -258,6 +296,7 @@ async def create_broadcast(
         text=message_text,
         request_screenshot=request_screenshot,
         districts=encode_districts(districts),
+        audience_roles=encode_audience_roles(audience_roles),
         image_token=image_token,
         image_filename=image_filename,
     )

@@ -6,13 +6,15 @@
 {% if error %}<div class="card" style="background:#fef2f2;color:#b91c1c">{{ error }}</div>{% endif %}
 <div class="card">
   <p style="color:#4b5563;font-size:14px;margin-top:0">
-    Удаление убирает запись из базы. Человек сможет снова нажать «Начать» в боте и пройти регистрацию с нуля.
+    <b>Группы</b> видны только в админке. Житель в боте их не выбирает — по умолчанию «Жители».
+    Отметьте зама или сотрудника вручную, чтобы потом слать рассылки и приглашения на ВКС только нужной группе.
   </p>
   {% if users %}
   <div class="user-list">
     {% for user in users %}
     {% set address = user.address_normalized or user.address or "—" %}
     {% set raw_address = user.address if user.address and user.address != address else none %}
+    {% set roles = parse_audience_roles(user.audience_roles) %}
     <article class="user-item">
       <div class="user-item-head">
         <div>
@@ -26,6 +28,12 @@
           <span class="badge">{{ user.state.value }}</span>
           {% endif %}
         </div>
+      </div>
+
+      <div style="margin-bottom:10px">
+        {% for slug in roles %}
+        <span class="badge" style="margin-right:6px">{{ audience_role_title(slug) }}</span>
+        {% endfor %}
       </div>
 
       <dl class="user-grid">
@@ -63,6 +71,18 @@
         <div class="user-meta" style="margin-top:6px">Как ввёл пользователь: {{ raw_address }}</div>
         {% endif %}
       </div>
+
+      <form method="post" action="/admin/users/{{ user.id }}/roles" style="margin:0 0 10px">
+        <div style="display:flex;flex-wrap:wrap;gap:12px 16px;margin-bottom:8px">
+          {% for role in audience_roles %}
+          <label style="font-size:14px">
+            <input type="checkbox" name="audience_roles" value="{{ role.slug }}"
+              {% if role.slug in roles %}checked{% endif %}> {{ role.title }}
+          </label>
+          {% endfor %}
+        </div>
+        <button class="btn btn-sm" type="submit">Сохранить группы</button>
+      </form>
 
       <form method="post" action="/admin/users/{{ user.id }}/delete" style="margin:0"
             onsubmit="return confirm('Удалить пользователя {{ user.fio or user.max_user_id }}?');">

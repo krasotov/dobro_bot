@@ -23,6 +23,11 @@ MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS city VARCHAR(255)",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS settlement VARCHAR(255)",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS address_qc INTEGER",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS address_street VARCHAR(255)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS address_house VARCHAR(64)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS address_apartment VARCHAR(32)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS address_latitude DOUBLE PRECISION",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS address_longitude DOUBLE PRECISION",
     "ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS districts TEXT",
     "ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS image_token VARCHAR(512)",
     "ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS image_url TEXT",
@@ -36,6 +41,16 @@ MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS appeal_draft_subject VARCHAR(200)",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS appeal_draft_message TEXT",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS appeal_draft_attachments TEXT",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS appeal_draft_category VARCHAR(16) DEFAULT 'general'",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_flow_state VARCHAR(16) DEFAULT 'none'",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS topic_subscriptions TEXT",
+    "ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS topics TEXT",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS audience_roles TEXT",
+    "ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS audience_roles TEXT",
+    "ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS poll_id VARCHAR(64)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS pending_screenshot_broadcast_id INTEGER REFERENCES broadcasts(id)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS pending_poll_id VARCHAR(64)",
+    "ALTER TABLE screenshots ADD COLUMN IF NOT EXISTS poll_id VARCHAR(64)",
 ]
 
 

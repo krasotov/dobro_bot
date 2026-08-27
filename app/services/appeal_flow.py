@@ -4,7 +4,8 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.max_client import max_client
+from app.services.bot_menu import send_main_menu
+from app.max_client import max_client, utilities_disclaimer_keyboard
 from app.models import User
 from app.services.admspgo_appeals import download_attachment, submit_max_appeal
 from app.services.appeal_attachments import (
@@ -25,14 +26,21 @@ from app.texts import (
     APPEAL_NEED_REGISTRATION,
     APPEAL_SENT,
     APPEAL_START_HINT,
+    APPEAL_UTILITIES_SUBJECT_HINT,
+    UTILITIES_DISCLAIMER,
 )
 
 APPEAL_FLOW_NONE = "none"
+APPEAL_FLOW_DISCLAIMER = "disclaimer"
 APPEAL_FLOW_SUBJECT = "subject"
 APPEAL_FLOW_MESSAGE = "message"
 APPEAL_FLOW_ATTACH = "attach"
 
+APPEAL_CATEGORY_GENERAL = "general"
+APPEAL_CATEGORY_UTILITIES = "utilities"
+
 SUBMIT_WORDS = {"отправить", "готово", "send", "submit"}
+CONTINUE_WORDS = {"продолжить", "continue", "да", "ok"}
 
 
 def _address_full(user: User) -> str | None:
@@ -40,38 +48,98 @@ def _address_full(user: User) -> str | None:
     return text or None
 
 
+def _api_category(user: User) -> str:
+    cat = (user.appeal_draft_category or APPEAL_CATEGORY_GENERAL).lower()
+    return "UTILITIES" if cat == APPEAL_CATEGORY_UTILITIES else "GENERAL"
+
+
 def _clear_draft(user: User) -> None:
     user.appeal_flow_state = APPEAL_FLOW_NONE
     user.appeal_draft_subject = None
     user.appeal_draft_message = None
     user.appeal_draft_attachments = None
+    user.appeal_draft_category = APPEAL_CATEGORY_GENERAL
 
 
-async def try_start_appeal_flow(session: AsyncSession, user: User) -> bool:
+def _in_appeal_flow(user: User) -> bool:
+    return (user.appeal_flow_state or APPEAL_FLOW_NONE) != APPEAL_FLOW_NONE
+
+
+async def _start_subject_step(session: AsyncSession, user: User) -> None:
+    user.appeal_flow_state = APPEAL_FLOW_SUBJECT
+    await session.commit()
+    hint = (
+        APPEAL_UTILITIES_SUBJECT_HINT
+        if (user.appeal_draft_category or "").lower() == APPEAL_CATEGORY_UTILITIES
+        else APPEAL_ASK_SUBJECT
+    )
+    await max_client.send_message(user.max_user_id, hint)
+
+
+async def try_start_appeal_flow(
+    session: AsyncSession,
+    user: User,
+    *,
+    category: str = APPEAL_CATEGORY_GENERAL,
+) -> bool:
     if not user.is_registered:
         await max_client.send_message(user.max_user_id, APPEAL_NEED_REGISTRATION)
         return True
 
-    if user.appeal_flow_state and user.appeal_flow_state != APPEAL_FLOW_NONE:
+    from app.services.profile_flow import in_profile_flow
+    from app.texts import PROFILE_FINISH_EDIT
+
+    if in_profile_flow(user):
+        await max_client.send_message(user.max_user_id, PROFILE_FINISH_EDIT)
+        return True
+
+    if _in_appeal_flow(user):
         await max_client.send_message(
             user.max_user_id,
             "Вы уже заполняете обращение. Введите текст или напишите <b>отмена</b>.",
         )
         return True
 
-    user.appeal_flow_state = APPEAL_FLOW_SUBJECT
     user.appeal_draft_subject = None
     user.appeal_draft_message = None
     user.appeal_draft_attachments = None
-    await session.commit()
-    await max_client.send_message(user.max_user_id, APPEAL_ASK_SUBJECT)
+    user.appeal_draft_category = category
+
+    if category == APPEAL_CATEGORY_UTILITIES:
+        user.appeal_flow_state = APPEAL_FLOW_DISCLAIMER
+        await session.commit()
+        await max_client.send_message(
+            user.max_user_id,
+            UTILITIES_DISCLAIMER,
+            attachments=utilities_disclaimer_keyboard(),
+        )
+        return True
+
+    await _start_subject_step(session, user)
     return True
+
+
+async def try_handle_appeal_callback(session: AsyncSession, user: User, payload: str) -> bool:
+    if payload == "utilities_continue":
+        if (user.appeal_flow_state or APPEAL_FLOW_NONE) != APPEAL_FLOW_DISCLAIMER:
+            return False
+        await _start_subject_step(session, user)
+        return True
+
+    if payload == "utilities_cancel":
+        if not _in_appeal_flow(user):
+            return False
+        await cancel_appeal_flow(session, user)
+        return True
+
+    return False
 
 
 async def cancel_appeal_flow(session: AsyncSession, user: User) -> None:
     _clear_draft(user)
     await session.commit()
     await max_client.send_message(user.max_user_id, APPEAL_CANCELLED)
+    await send_main_menu(user.max_user_id, registered=True)
 
 
 async def _submit_appeal(session: AsyncSession, user: User) -> None:
@@ -100,6 +168,7 @@ async def _submit_appeal(session: AsyncSession, user: User) -> None:
         "reporterDistrict": user.district,
         "addressFull": address,
         "addressLabel": "MAX",
+        "category": _api_category(user),
     }
 
     metas = parse_draft_attachments(user.appeal_draft_attachments)
@@ -116,6 +185,7 @@ async def _submit_appeal(session: AsyncSession, user: User) -> None:
 
     if ok:
         await max_client.send_message(user.max_user_id, APPEAL_SENT)
+        await send_main_menu(user.max_user_id, registered=True)
     else:
         await max_client.send_message(user.max_user_id, err or APPEAL_START_HINT)
 
@@ -134,6 +204,17 @@ async def handle_appeal_flow_message(
     lowered = text.lower().strip()
     if lowered in {"отмена", "cancel"}:
         await cancel_appeal_flow(session, user)
+        return True
+
+    if state == APPEAL_FLOW_DISCLAIMER:
+        if lowered in CONTINUE_WORDS:
+            await _start_subject_step(session, user)
+            return True
+        await max_client.send_message(
+            user.max_user_id,
+            "Нажмите <b>Продолжить</b> под сообщением или напишите <b>отмена</b>.",
+            attachments=utilities_disclaimer_keyboard(),
+        )
         return True
 
     if state == APPEAL_FLOW_ATTACH:

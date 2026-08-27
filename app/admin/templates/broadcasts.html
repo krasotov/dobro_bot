@@ -20,7 +20,21 @@
     <p><label><input type="checkbox" name="request_screenshot" value="true"> Просить приложить скриншот</label></p>
 
     <h3>Кому отправить</h3>
-    <p>Если ничего не выбрать — отправится <b>всем</b> зарегистрированным.</p>
+    <p>Если ничего не выбрать в группах и районах — отправится <b>всем</b> зарегистрированным.</p>
+
+    <h4>Группы (только админка)</h4>
+    <div style="margin-bottom:12px">
+      {% for role in audience_roles %}
+      <label style="display:block; margin-bottom:6px">
+        <input type="checkbox" name="audience_roles" value="{{ role.slug }}"> {{ role.title }}
+      </label>
+      {% endfor %}
+    </div>
+    <p style="color:#4b5563;font-size:13px;margin-top:0">
+      Например, ссылку на ВКС можно отправить только группе «Замы». Жители эти группы в боте не видят.
+    </p>
+
+    <h4>Районы</h4>
     {% if districts %}
     <div style="columns:2; margin-bottom:12px">
       {% for district in districts %}
@@ -40,13 +54,18 @@
   <h2>История</h2>
   <div class="table-wrap">
   <table class="data-table">
-    <thead><tr><th>ID</th><th>Дата</th><th>Районы</th><th>Картинка</th><th>Источник</th><th>Получателей</th><th>Отправлено</th><th>Ошибок</th><th>Текст</th></tr></thead>
+    <thead><tr><th>ID</th><th>Дата</th><th>Группы</th><th>Районы</th><th>Картинка</th><th>Источник</th><th>Получателей</th><th>Отправлено</th><th>Ошибок</th><th>Текст</th></tr></thead>
     <tbody>
       {% for b in broadcasts %}
       <tr>
         <td>{{ b.id }}</td>
         <td>{{ b.created_at }}</td>
-        <td>{% if b.get_district_list() %}{{ b.get_district_list()|join(', ') }}{% else %}всем{% endif %}</td>
+        <td>
+          {% if b.get_audience_role_list() %}
+          {% for slug in b.get_audience_role_list() %}{{ audience_role_title(slug) }}{% if not loop.last %}, {% endif %}{% endfor %}
+          {% else %}всем{% endif %}
+        </td>
+        <td>{% if b.get_district_list() %}{{ b.get_district_list()|join(', ') }}{% else %}все{% endif %}</td>
         <td>{% if b.image_filename %}{{ b.image_filename }}{% elif b.image_token or b.image_url %}да{% else %}—{% endif %}</td>
         <td>{% if b.auto_from_channel %}канал{% else %}админка{% endif %}</td>
         <td>{{ b.total_recipients }}</td>
