@@ -96,7 +96,7 @@ async def get_or_create_user(session: AsyncSession, update: dict[str, Any]) -> U
 async def start_registration(session: AsyncSession, user: User) -> None:
     if user.is_registered:
         await max_client.send_message(user.max_user_id, ALREADY_REGISTERED)
-        await send_main_menu(user.max_user_id, registered=True)
+        await send_main_menu(user.max_user_id, registered=True, user=user)
         return
 
     user.state = RegistrationState.AWAITING_CONSENT
@@ -166,6 +166,15 @@ async def handle_callback(session: AsyncSession, update: dict[str, Any]) -> None
     if await try_handle_appeal_callback(session, user, payload):
         return
 
+    from app.services.transport_order_flow import try_handle_transport_callback
+    from app.services.transport_operator_flow import try_handle_transport_operator_callback
+
+    if await try_handle_transport_callback(session, user, payload):
+        return
+
+    if await try_handle_transport_operator_callback(session, user, payload):
+        return
+
     if await try_handle_menu_callback(session, user, payload):
         return
 
@@ -191,7 +200,7 @@ async def handle_message_created(session: AsyncSession, update: dict[str, Any]) 
 
     if text and await try_directory_command(user.max_user_id, text):
         if user.is_registered:
-            await send_main_menu(user.max_user_id, registered=True)
+            await send_main_menu(user.max_user_id, registered=True, user=user)
         else:
             await send_main_menu(user.max_user_id, registered=False)
         return
@@ -199,7 +208,7 @@ async def handle_message_created(session: AsyncSession, update: dict[str, Any]) 
     if text:
         cmd = text.lower().strip()
         if cmd in {"меню", "menu"}:
-            await send_main_menu(user.max_user_id, registered=user.is_registered)
+            await send_main_menu(user.max_user_id, registered=user.is_registered, user=user)
             return
         if cmd in {"помощь", "help"} and not user.is_registered:
             await max_client.send_message(
@@ -210,9 +219,14 @@ async def handle_message_created(session: AsyncSession, update: dict[str, Any]) 
             return
 
     if user.is_registered:
+        from app.services.transport_order_flow import handle_transport_flow_message, in_transport_flow
+
         in_appeal = (user.appeal_flow_state or APPEAL_FLOW_NONE) != APPEAL_FLOW_NONE
         if in_profile_flow(user) and (text or attachments):
             if await handle_profile_flow_message(session, user, text, attachments):
+                return
+        if in_transport_flow(user) and text:
+            if await handle_transport_flow_message(session, user, text):
                 return
         if in_appeal or text or attachments:
             if await handle_appeal_flow_message(session, user, text, attachments):
@@ -298,7 +312,7 @@ async def _process_address_input(session: AsyncSession, user: User, raw_address:
 async def _handle_registered_text(session: AsyncSession, user: User, text: str) -> None:
     command = text.lower().strip()
     if command in {"меню", "menu"}:
-        await send_main_menu(user.max_user_id, registered=True)
+        await send_main_menu(user.max_user_id, registered=True, user=user)
         return
     if command in {"мероприятия", "мероприятие", "events", "event"}:
         from app.services.event_flow import send_events_list
@@ -333,7 +347,7 @@ async def _handle_registered_text(session: AsyncSession, user: User, text: str) 
         )
         return
     await send_appeal_hint(user)
-    await send_main_menu(user.max_user_id, registered=True)
+    await send_main_menu(user.max_user_id, registered=True, user=user)
 
 
 async def _complete_phone_step(

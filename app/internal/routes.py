@@ -14,7 +14,7 @@ from app.config import settings
 from app.database import async_session, get_session
 from app.internal.auth import require_internal_api_token
 from app.max_client import max_client
-from app.models import AdminRole, AdminUser, Broadcast, NewsChannelSource, Screenshot, User
+from app.models import AdminRole, AdminUser, Broadcast, Driver, NewsChannelSource, Screenshot, TransportOrder, User, Vehicle
 from app.services.broadcast import encode_districts, encode_topics, send_broadcast
 from app.services.audience_roles import (
     AUDIENCE_ROLES,
@@ -24,7 +24,7 @@ from app.services.audience_roles import (
 from app.services.broadcast_media import upload_broadcast_image, validate_broadcast_image
 from app.services.channel_news import get_news_channel_source
 from app.services.user_admin import delete_user_record
-from app.services.user_export import build_registered_users_csv
+from app.services.transport_service import format_trip_date
 from app.utils.password import hash_password
 
 logger = logging.getLogger(__name__)
@@ -563,3 +563,189 @@ async def toggle_news_channel(
         "chatId": source.chat_id,
         "channelUrl": source.channel_url,
     }
+
+
+class VehicleBody(BaseModel):
+    plateNumber: str = Field(min_length=3, max_length=32)
+    makeModel: str = Field(min_length=2, max_length=255)
+    isActive: bool = True
+
+
+class DriverBody(BaseModel):
+    fio: str = Field(min_length=2, max_length=255)
+    phone: str = Field(min_length=5, max_length=32)
+    vehicleId: int | None = None
+    maxUserId: int | None = None
+    isActive: bool = True
+
+
+@router.get("/transport/vehicles")
+async def list_vehicles(
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    result = await session.execute(select(Vehicle).order_by(Vehicle.make_model.asc()))
+    items = []
+    for vehicle in result.scalars().all():
+        items.append(
+            {
+                "id": vehicle.id,
+                "plateNumber": vehicle.plate_number,
+                "makeModel": vehicle.make_model,
+                "isActive": vehicle.is_active,
+            }
+        )
+    return {"vehicles": items}
+
+
+@router.post("/transport/vehicles")
+async def create_vehicle(
+    body: VehicleBody,
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    vehicle = Vehicle(
+        plate_number=body.plateNumber.strip(),
+        make_model=body.makeModel.strip(),
+        is_active=body.isActive,
+    )
+    session.add(vehicle)
+    await session.commit()
+    await session.refresh(vehicle)
+    return {
+        "id": vehicle.id,
+        "plateNumber": vehicle.plate_number,
+        "makeModel": vehicle.make_model,
+        "isActive": vehicle.is_active,
+    }
+
+
+@router.patch("/transport/vehicles/{vehicle_id}")
+async def update_vehicle(
+    vehicle_id: int,
+    body: VehicleBody,
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    vehicle = await session.get(Vehicle, vehicle_id)
+    if not vehicle:
+        raise HTTPException(status_code=404, detail="Автомобиль не найден")
+    vehicle.plate_number = body.plateNumber.strip()
+    vehicle.make_model = body.makeModel.strip()
+    vehicle.is_active = body.isActive
+    await session.commit()
+    return {
+        "id": vehicle.id,
+        "plateNumber": vehicle.plate_number,
+        "makeModel": vehicle.make_model,
+        "isActive": vehicle.is_active,
+    }
+
+
+@router.get("/transport/drivers")
+async def list_drivers(
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    result = await session.execute(select(Driver).order_by(Driver.fio.asc()))
+    items = []
+    for driver in result.scalars().all():
+        items.append(
+            {
+                "id": driver.id,
+                "fio": driver.fio,
+                "phone": driver.phone,
+                "vehicleId": driver.vehicle_id,
+                "maxUserId": driver.max_user_id,
+                "isActive": driver.is_active,
+            }
+        )
+    return {"drivers": items}
+
+
+@router.post("/transport/drivers")
+async def create_driver(
+    body: DriverBody,
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    driver = Driver(
+        fio=body.fio.strip(),
+        phone=body.phone.strip(),
+        vehicle_id=body.vehicleId,
+        max_user_id=body.maxUserId,
+        is_active=body.isActive,
+    )
+    session.add(driver)
+    await session.commit()
+    await session.refresh(driver)
+    return {
+        "id": driver.id,
+        "fio": driver.fio,
+        "phone": driver.phone,
+        "vehicleId": driver.vehicle_id,
+        "maxUserId": driver.max_user_id,
+        "isActive": driver.is_active,
+    }
+
+
+@router.patch("/transport/drivers/{driver_id}")
+async def update_driver(
+    driver_id: int,
+    body: DriverBody,
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    driver = await session.get(Driver, driver_id)
+    if not driver:
+        raise HTTPException(status_code=404, detail="Водитель не найден")
+    driver.fio = body.fio.strip()
+    driver.phone = body.phone.strip()
+    driver.vehicle_id = body.vehicleId
+    driver.max_user_id = body.maxUserId
+    driver.is_active = body.isActive
+    await session.commit()
+    return {
+        "id": driver.id,
+        "fio": driver.fio,
+        "phone": driver.phone,
+        "vehicleId": driver.vehicle_id,
+        "maxUserId": driver.max_user_id,
+        "isActive": driver.is_active,
+    }
+
+
+@router.get("/transport/orders")
+async def list_transport_orders(
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+    status: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> dict:
+    query = select(TransportOrder).order_by(TransportOrder.created_at.desc()).limit(limit)
+    if status:
+        query = query.where(TransportOrder.status == status)
+    result = await session.execute(query)
+    items = []
+    for order in result.scalars().all():
+        requester = await session.get(User, order.requester_id)
+        vehicle = await session.get(Vehicle, order.vehicle_id) if order.vehicle_id else None
+        driver = await session.get(Driver, order.driver_id) if order.driver_id else None
+        items.append(
+            {
+                "id": order.id,
+                "status": order.status,
+                "tripDate": format_trip_date(order.trip_date),
+                "tripTime": order.trip_time,
+                "destination": order.destination,
+                "requesterFio": requester.fio if requester else None,
+                "requesterPhone": requester.phone if requester else None,
+                "vehiclePlate": vehicle.plate_number if vehicle else None,
+                "vehicleMakeModel": vehicle.make_model if vehicle else None,
+                "driverFio": driver.fio if driver else None,
+                "driverPhone": driver.phone if driver else None,
+                "createdAt": _iso(order.created_at),
+                "assignedAt": _iso(order.assigned_at),
+            }
+        )
+    return {"orders": items}

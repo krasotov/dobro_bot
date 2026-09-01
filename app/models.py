@@ -68,6 +68,11 @@ class User(Base):
     topic_subscriptions: Mapped[str | None] = mapped_column(Text)
     audience_roles: Mapped[str | None] = mapped_column(Text)
 
+    transport_flow_state: Mapped[str | None] = mapped_column(String(16), default="none")
+    transport_draft_date: Mapped[str | None] = mapped_column(String(10))
+    transport_draft_time: Mapped[str | None] = mapped_column(String(5))
+    transport_draft_destination: Mapped[str | None] = mapped_column(String(500))
+
     pending_screenshot_broadcast_id: Mapped[int | None] = mapped_column(
         ForeignKey("broadcasts.id"), nullable=True, index=True
     )
@@ -231,3 +236,61 @@ class Screenshot(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="screenshots")
+
+
+class Vehicle(Base):
+    __tablename__ = "vehicles"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    plate_number: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    make_model: Mapped[str] = mapped_column(String(255))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    drivers: Mapped[list["Driver"]] = relationship(back_populates="vehicle")
+    orders: Mapped[list["TransportOrder"]] = relationship(back_populates="vehicle")
+
+
+class Driver(Base):
+    __tablename__ = "drivers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    fio: Mapped[str] = mapped_column(String(255))
+    phone: Mapped[str] = mapped_column(String(32))
+    vehicle_id: Mapped[int | None] = mapped_column(ForeignKey("vehicles.id"), index=True)
+    max_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    vehicle: Mapped["Vehicle | None"] = relationship(back_populates="drivers")
+    orders: Mapped[list["TransportOrder"]] = relationship(back_populates="driver")
+
+
+class TransportOrder(Base):
+    __tablename__ = "transport_orders"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    requester_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    trip_date: Mapped[str] = mapped_column(String(10))
+    trip_time: Mapped[str] = mapped_column(String(5))
+    destination: Mapped[str] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(String(16), default="new", index=True)
+    vehicle_id: Mapped[int | None] = mapped_column(ForeignKey("vehicles.id"), nullable=True)
+    driver_id: Mapped[int | None] = mapped_column(ForeignKey("drivers.id"), nullable=True)
+    operator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    requester: Mapped["User"] = relationship(foreign_keys=[requester_id])
+    vehicle: Mapped["Vehicle | None"] = relationship(back_populates="orders")
+    driver: Mapped["Driver | None"] = relationship(back_populates="orders")
+    operator: Mapped["User | None"] = relationship(foreign_keys=[operator_id])

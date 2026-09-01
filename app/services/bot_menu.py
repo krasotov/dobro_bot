@@ -17,16 +17,24 @@ MENU_PAYLOADS = frozenset(
         "menu_status",
         "menu_open",
         "menu_polls",
+        "menu_transport",
+        "menu_transport_ops",
     },
 )
 
 
-async def send_main_menu(max_user_id: int, *, registered: bool, text: str | None = None) -> None:
+async def send_main_menu(
+    max_user_id: int,
+    *,
+    registered: bool,
+    user: User | None = None,
+    text: str | None = None,
+) -> None:
     message = text or MENU_PROMPT
     await max_client.send_message(
         max_user_id,
         message,
-        attachments=main_menu_keyboard(registered=registered),
+        attachments=main_menu_keyboard(registered=registered, user=user),
     )
 
 
@@ -51,12 +59,24 @@ async def try_handle_menu_callback(
 
     if payload == "menu_directory":
         await send_directory_to_user(user.max_user_id)
-        await send_main_menu(user.max_user_id, registered=user.is_registered)
+        await send_main_menu(user.max_user_id, registered=user.is_registered, user=user)
         return True
 
     if not user.is_registered:
         await max_client.send_message(user.max_user_id, MENU_GUEST)
         await send_main_menu(user.max_user_id, registered=False)
+        return True
+
+    if payload == "menu_transport":
+        from app.services.transport_order_flow import try_start_transport_order
+
+        await try_start_transport_order(session, user)
+        return True
+
+    if payload == "menu_transport_ops":
+        from app.services.transport_operator_flow import send_operator_orders_list
+
+        await send_operator_orders_list(session, user)
         return True
 
     if payload == "menu_appeal":
@@ -80,7 +100,7 @@ async def try_handle_menu_callback(
         return True
 
     if payload == "menu_open":
-        await send_main_menu(user.max_user_id, registered=user.is_registered)
+        await send_main_menu(user.max_user_id, registered=user.is_registered, user=user)
         return True
 
     return False

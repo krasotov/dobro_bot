@@ -12,7 +12,11 @@ AUDIENCE_ROLES: tuple[dict[str, str], ...] = (
     {"slug": "budget", "title": "Бюджетники"},
     {"slug": "deputy", "title": "Замы"},
     {"slug": "administration", "title": "Администрация"},
+    {"slug": "driver", "title": "Водители"},
+    {"slug": "operator", "title": "Операторы"},
 )
+
+ORDER_TRANSPORT_ROLES = frozenset({"deputy", "administration"})
 
 VALID_AUDIENCE_SLUGS = {item["slug"] for item in AUDIENCE_ROLES}
 
@@ -66,3 +70,16 @@ def get_broadcast_audience_role_list(broadcast: Broadcast) -> list[str]:
     if not isinstance(data, list):
         return []
     return [str(x) for x in data if str(x) in VALID_AUDIENCE_SLUGS]
+
+
+def user_has_audience_role(user: User, slug: str) -> bool:
+    return slug in parse_audience_roles(user.audience_roles)
+
+
+def user_can_order_transport(user: User) -> bool:
+    roles = set(parse_audience_roles(user.audience_roles))
+    return bool(roles & ORDER_TRANSPORT_ROLES)
+
+
+def user_is_transport_operator(user: User) -> bool:
+    return user_has_audience_role(user, "operator")
