@@ -111,13 +111,20 @@ async def start_registration(session: AsyncSession, user: User) -> None:
 async def handle_callback(session: AsyncSession, update: dict[str, Any]) -> None:
     callback = update.get("callback") or {}
     payload = callback.get("payload", "")
+    callback_id = callback.get("callback_id")
     user = await get_or_create_user(session, update)
     if not user:
         return
 
-    callback_id = callback.get("callback_id")
-    if callback_id:
-        await max_client.answer_callback(callback_id, notification="Принято")
+    from app.services.callback_guard import is_debounced_action, is_duplicate_callback
+
+    if callback_id and is_duplicate_callback(str(callback_id)):
+        await max_client.answer_callback(str(callback_id), notification="Принято")
+        return
+
+    if callback_id and is_debounced_action(user.max_user_id, payload):
+        await max_client.answer_callback(str(callback_id), notification="Принято")
+        return
 
     if payload == "consent_yes":
         if user.is_registered:
@@ -168,15 +175,22 @@ async def handle_callback(session: AsyncSession, update: dict[str, Any]) -> None
 
     from app.services.transport_order_flow import try_handle_transport_callback
     from app.services.transport_operator_flow import try_handle_transport_operator_callback
+    from app.services.appeal_operator_flow import try_handle_appeal_operator_callback
 
     if await try_handle_transport_callback(session, user, payload):
         return
 
-    if await try_handle_transport_operator_callback(session, user, payload):
+    if await try_handle_transport_operator_callback(session, user, payload, callback_id=str(callback_id) if callback_id else None):
+        return
+
+    if await try_handle_appeal_operator_callback(session, user, payload, callback_id=str(callback_id) if callback_id else None):
         return
 
     if await try_handle_menu_callback(session, user, payload):
         return
+
+    if callback_id:
+        await max_client.answer_callback(str(callback_id), notification="Принято")
 
 
 async def handle_message_created(session: AsyncSession, update: dict[str, Any]) -> None:
@@ -219,11 +233,15 @@ async def handle_message_created(session: AsyncSession, update: dict[str, Any]) 
             return
 
     if user.is_registered:
+        from app.services.appeal_operator_flow import handle_appeal_operator_message, in_appeal_operator_flow
         from app.services.transport_order_flow import handle_transport_flow_message, in_transport_flow
 
         in_appeal = (user.appeal_flow_state or APPEAL_FLOW_NONE) != APPEAL_FLOW_NONE
         if in_profile_flow(user) and (text or attachments):
             if await handle_profile_flow_message(session, user, text, attachments):
+                return
+        if in_appeal_operator_flow(user) and text:
+            if await handle_appeal_operator_message(session, user, text):
                 return
         if in_transport_flow(user) and text:
             if await handle_transport_flow_message(session, user, text):

@@ -55,6 +55,9 @@ MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS transport_draft_date VARCHAR(10)",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS transport_draft_time VARCHAR(5)",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS transport_draft_destination VARCHAR(500)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS appeal_operator_flow_state VARCHAR(16) DEFAULT 'none'",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS appeal_operator_appeal_id VARCHAR(64)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS appeal_operator_target_status VARCHAR(16)",
 ]
 
 

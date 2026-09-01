@@ -18,7 +18,6 @@ MENU_PAYLOADS = frozenset(
         "menu_open",
         "menu_polls",
         "menu_transport",
-        "menu_transport_ops",
     },
 )
 
@@ -71,12 +70,6 @@ async def try_handle_menu_callback(
         from app.services.transport_order_flow import try_start_transport_order
 
         await try_start_transport_order(session, user)
-        return True
-
-    if payload == "menu_transport_ops":
-        from app.services.transport_operator_flow import send_operator_orders_list
-
-        await send_operator_orders_list(session, user)
         return True
 
     if payload == "menu_appeal":

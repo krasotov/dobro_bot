@@ -73,6 +73,10 @@ class User(Base):
     transport_draft_time: Mapped[str | None] = mapped_column(String(5))
     transport_draft_destination: Mapped[str | None] = mapped_column(String(500))
 
+    appeal_operator_flow_state: Mapped[str | None] = mapped_column(String(16), default="none")
+    appeal_operator_appeal_id: Mapped[str | None] = mapped_column(String(64))
+    appeal_operator_target_status: Mapped[str | None] = mapped_column(String(16))
+
     pending_screenshot_broadcast_id: Mapped[int | None] = mapped_column(
         ForeignKey("broadcasts.id"), nullable=True, index=True
     )

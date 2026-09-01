@@ -305,7 +305,11 @@ def transport_confirm_keyboard() -> list[dict[str, Any]]:
 
 def main_menu_keyboard(*, registered: bool, user: Any | None = None) -> list[dict[str, Any]]:
     """Главное меню бота (inline-кнопки под сообщением)."""
-    from app.services.audience_roles import user_can_order_transport, user_is_transport_operator
+    from app.services.audience_roles import (
+        user_can_order_transport,
+        user_is_appeals_operator,
+        user_is_garage_operator,
+    )
 
     buttons: list[list[dict[str, Any]]] = [
         [{"type": "callback", "text": "Справочник", "payload": "menu_directory"}],
@@ -315,9 +319,13 @@ def main_menu_keyboard(*, registered: bool, user: Any | None = None) -> list[dic
             buttons.append(
                 [{"type": "callback", "text": "🚗 Заказать авто", "payload": "menu_transport"}]
             )
-        if user and user_is_transport_operator(user):
+        if user and user_is_garage_operator(user):
             buttons.append(
                 [{"type": "callback", "text": "🚗 Заявки на авто", "payload": "menu_transport_ops"}]
+            )
+        if user and user_is_appeals_operator(user):
+            buttons.append(
+                [{"type": "callback", "text": "📋 Обращения", "payload": "menu_appeals_ops"}]
             )
         buttons.append(
             [

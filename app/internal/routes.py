@@ -20,6 +20,7 @@ from app.services.audience_roles import (
     AUDIENCE_ROLES,
     encode_audience_roles,
     parse_audience_roles,
+    user_is_appeals_operator,
 )
 from app.services.broadcast_media import upload_broadcast_image, validate_broadcast_image
 from app.services.channel_news import get_news_channel_source
@@ -192,6 +193,10 @@ class NotifyBatchBody(BaseModel):
     maxUserIds: list[int | str] = Field(min_length=1, max_length=500)
 
 
+class NotifyOperatorsBody(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+
+
 class UpdateUserAudienceRolesBody(BaseModel):
     audienceRoles: list[str] = Field(min_length=1, max_length=8)
 
@@ -280,6 +285,30 @@ async def notify_users_batch(
             sent += 1
         except Exception:
             logger.exception("notify-batch failed for max_user_id=%s", raw_id)
+            failed += 1
+    return {"success": True, "sentCount": sent, "failedCount": failed}
+
+
+@router.post("/operators/notify-appeals-operators")
+async def notify_appeals_operators(
+    body: NotifyOperatorsBody,
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    text = body.text.strip()
+    result = await session.execute(
+        select(User).where(User.is_registered.is_(True), User.is_active.is_(True))
+    )
+    sent = 0
+    failed = 0
+    for user in result.scalars():
+        if not user_is_appeals_operator(user):
+            continue
+        try:
+            await max_client.send_message(user.max_user_id, text)
+            sent += 1
+        except Exception:
+            logger.exception("notify appeals operator failed for max_user_id=%s", user.max_user_id)
             failed += 1
     return {"success": True, "sentCount": sent, "failedCount": failed}
 

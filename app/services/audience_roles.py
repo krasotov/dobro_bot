@@ -13,10 +13,14 @@ AUDIENCE_ROLES: tuple[dict[str, str], ...] = (
     {"slug": "deputy", "title": "Замы"},
     {"slug": "administration", "title": "Администрация"},
     {"slug": "driver", "title": "Водители"},
-    {"slug": "operator", "title": "Операторы"},
+    {"slug": "garage_operator", "title": "Оператор гаража"},
+    {"slug": "appeals_operator", "title": "Оператор обращений"},
+    {"slug": "operator", "title": "Оператор (все функции)"},
 )
 
 ORDER_TRANSPORT_ROLES = frozenset({"deputy", "administration"})
+GARAGE_OPERATOR_ROLES = frozenset({"garage_operator", "operator"})
+APPEALS_OPERATOR_ROLES = frozenset({"appeals_operator", "operator"})
 
 VALID_AUDIENCE_SLUGS = {item["slug"] for item in AUDIENCE_ROLES}
 
@@ -81,5 +85,16 @@ def user_can_order_transport(user: User) -> bool:
     return bool(roles & ORDER_TRANSPORT_ROLES)
 
 
+def user_is_garage_operator(user: User) -> bool:
+    roles = set(parse_audience_roles(user.audience_roles))
+    return bool(roles & GARAGE_OPERATOR_ROLES)
+
+
+def user_is_appeals_operator(user: User) -> bool:
+    roles = set(parse_audience_roles(user.audience_roles))
+    return bool(roles & APPEALS_OPERATOR_ROLES)
+
+
 def user_is_transport_operator(user: User) -> bool:
-    return user_has_audience_role(user, "operator")
+    """Обратная совместимость."""
+    return user_is_garage_operator(user)

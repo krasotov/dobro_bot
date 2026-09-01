@@ -64,7 +64,12 @@ def _orders_keyboard(orders: list[TransportOrder]) -> list[dict]:
     return [{"type": "inline_keyboard", "payload": {"buttons": rows or [[{"type": "callback", "text": "Обновить", "payload": "menu_transport_ops"}]]}}]
 
 
-async def send_operator_orders_list(session: AsyncSession, user: User) -> None:
+async def send_operator_orders_list(
+    session: AsyncSession,
+    user: User,
+    *,
+    callback_id: str | None = None,
+) -> None:
     if not user_is_transport_operator(user):
         await max_client.send_message(user.max_user_id, TRANSPORT_OPERATOR_NEED_ROLE)
         return
@@ -77,23 +82,35 @@ async def send_operator_orders_list(session: AsyncSession, user: User) -> None:
     )
     orders = result.scalars().all()
     if not orders:
-        await max_client.send_message(user.max_user_id, TRANSPORT_OPERATOR_NO_ORDERS)
+        text = TRANSPORT_OPERATOR_NO_ORDERS
+        attachments = None
+    else:
+        text = "<b>Новые заявки на автомобиль</b>\nВыберите заявку:"
+        attachments = _orders_keyboard(orders)
+
+    if callback_id:
+        body: dict = {"text": text, "format": "html"}
+        if attachments:
+            body["attachments"] = attachments
+        await max_client.answer_callback(
+            callback_id,
+            message=body,
+            notification="Принято",
+        )
         return
 
-    await max_client.send_message(
-        user.max_user_id,
-        "<b>Новые заявки на автомобиль</b>\nВыберите заявку:",
-        attachments=_orders_keyboard(orders),
-    )
+    await max_client.send_message(user.max_user_id, text, attachments=attachments)
 
 
 async def try_handle_transport_operator_callback(
     session: AsyncSession,
     user: User,
     payload: str,
+    *,
+    callback_id: str | None = None,
 ) -> bool:
     if payload == "menu_transport_ops":
-        await send_operator_orders_list(session, user)
+        await send_operator_orders_list(session, user, callback_id=callback_id)
         return True
 
     if payload.startswith("transport_op_order_"):
