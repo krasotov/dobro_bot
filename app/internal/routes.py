@@ -749,3 +749,69 @@ async def list_transport_orders(
             }
         )
     return {"orders": items}
+
+
+@router.delete("/transport/orders/{order_id}")
+async def delete_transport_order(
+    order_id: int,
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    order = await session.get(TransportOrder, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Заявка не найдена")
+    await session.delete(order)
+    await session.commit()
+    return {"success": True, "deletedOrderId": order_id}
+
+
+@router.delete("/transport/vehicles/{vehicle_id}")
+async def delete_vehicle(
+    vehicle_id: int,
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    vehicle = await session.get(Vehicle, vehicle_id)
+    if not vehicle:
+        raise HTTPException(status_code=404, detail="Автомобиль не найден")
+
+    linked_orders = await session.scalar(
+        select(func.count()).select_from(TransportOrder).where(TransportOrder.vehicle_id == vehicle_id)
+    )
+    if linked_orders:
+        raise HTTPException(
+            status_code=400,
+            detail="Нельзя удалить: автомобиль указан в заявках. Отключите его или удалите заявки.",
+        )
+
+    drivers_result = await session.execute(select(Driver).where(Driver.vehicle_id == vehicle_id))
+    for driver in drivers_result.scalars().all():
+        driver.vehicle_id = None
+
+    await session.delete(vehicle)
+    await session.commit()
+    return {"success": True, "deletedVehicleId": vehicle_id}
+
+
+@router.delete("/transport/drivers/{driver_id}")
+async def delete_driver(
+    driver_id: int,
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    driver = await session.get(Driver, driver_id)
+    if not driver:
+        raise HTTPException(status_code=404, detail="Водитель не найден")
+
+    linked_orders = await session.scalar(
+        select(func.count()).select_from(TransportOrder).where(TransportOrder.driver_id == driver_id)
+    )
+    if linked_orders:
+        raise HTTPException(
+            status_code=400,
+            detail="Нельзя удалить: водитель указан в заявках. Отключите его или удалите заявки.",
+        )
+
+    await session.delete(driver)
+    await session.commit()
+    return {"success": True, "deletedDriverId": driver_id}
