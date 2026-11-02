@@ -47,6 +47,35 @@ def extract_message_id(message: dict[str, Any]) -> str | None:
     return None
 
 
+def extract_message_link(message: dict[str, Any]) -> dict[str, str]:
+    """Reply/forward metadata from MAX message link (parent mid + quoted text)."""
+    body = message.get("body") or {}
+    link = body.get("link")
+    if not isinstance(link, dict):
+        top_level = message.get("link")
+        link = top_level if isinstance(top_level, dict) else None
+    if not isinstance(link, dict):
+        return {}
+
+    link_type_raw = link.get("type")
+    link_type = str(link_type_raw).strip().lower() if link_type_raw else ""
+    nested = link.get("message") or {}
+    if not isinstance(nested, dict):
+        nested = {}
+
+    parent_mid = nested.get("mid") or nested.get("message_id")
+    quoted = (nested.get("text") or "").strip()
+
+    out: dict[str, str] = {}
+    if link_type in {"reply", "forward"}:
+        out["linkType"] = link_type
+    if parent_mid:
+        out["replyToMessageId"] = str(parent_mid)
+    if quoted:
+        out["quotedText"] = quoted[:4000]
+    return out
+
+
 def extract_image_payload(attachments: list[dict[str, Any]]) -> tuple[str | None, str | None]:
     for attachment in attachments:
         if attachment.get("type") not in {"image", "photo", "file"}:
@@ -86,6 +115,9 @@ async def bind_channel_on_bot_added(session: AsyncSession, update: dict[str, Any
 
     source.chat_id = int(chat_id)
     source.is_enabled = True
+    from app.services.bot_chats import ensure_known_chat
+
+    await ensure_known_chat(session, int(chat_id), is_channel=bool(update.get("is_channel")))
     logger.info("News source bound to chat_id=%s (channel=%s)", chat_id, update.get("is_channel"))
 
 

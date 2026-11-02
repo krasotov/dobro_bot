@@ -55,6 +55,12 @@ class MaxClient:
     async def get_me(self) -> dict[str, Any]:
         return await self._request("GET", "/me")
 
+    async def get_chat(self, chat_id: int) -> dict[str, Any]:
+        return await self._request("GET", f"/chats/{chat_id}")
+
+    async def set_commands(self, commands: list[dict[str, str]]) -> dict[str, Any]:
+        return await self._request("PATCH", "/me/commands", json={"commands": commands})
+
     async def get_upload_url(self, upload_type: str = "image") -> dict[str, Any]:
         return await self._request("POST", "/uploads", params={"type": upload_type})
 
@@ -92,26 +98,134 @@ class MaxClient:
         await asyncio.sleep(0.5)
         return token
 
+    async def upload_file(self, file_bytes: bytes, filename: str) -> str:
+        upload_info = await self.get_upload_url("file")
+        upload_url = upload_info["url"]
+        token = upload_info.get("token")
+
+        async with httpx.AsyncClient(
+            verify=settings.max_api_verify_ssl,
+            timeout=120.0,
+        ) as client:
+            response = await client.post(
+                upload_url,
+                files={"data": (filename, file_bytes)},
+            )
+
+        if response.status_code >= 400:
+            raise MaxApiError(response.status_code, response.text)
+
+        if response.content:
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = {}
+            token = payload.get("token") or token
+
+        if not token:
+            parsed = urlparse(upload_url)
+            token = parse_qs(parsed.query).get("token", [None])[0]
+
+        if not token:
+            raise MaxApiError(500, "MAX API did not return file token")
+
+        await asyncio.sleep(0.5)
+        return token
+
+    async def deliver_message(
+        self,
+        user_id: int,
+        text: str,
+        *,
+        callback_id: str | None = None,
+        chat_id: int | None = None,
+        attachments: list[dict[str, Any]] | None = None,
+        link: dict[str, Any] | None = None,
+        format: str = "html",
+        menu_bar: bool = True,
+        notification: str | None = None,
+    ) -> dict[str, Any]:
+        """Ack callback и новое сообщение в диалог (без edit через answer — так стабильнее в клиенте MAX)."""
+        att = attachments
+        if menu_bar:
+            att = ensure_menu_bar(att)
+
+        if callback_id:
+            toast = notification if notification is not None and str(notification).strip() else "✓"
+            try:
+                await self.answer_callback(callback_id, notification=toast)
+            except MaxApiError:
+                try:
+                    await self.answer_callback(callback_id)
+                except MaxApiError:
+                    pass
+
+        try:
+            return await self.send_message(
+                user_id,
+                text,
+                chat_id=chat_id,
+                attachments=att,
+                link=link,
+                format=format,
+                menu_bar=False,
+            )
+        except MaxApiError:
+            if chat_id is None:
+                raise
+            return await self.send_message(
+                user_id,
+                text,
+                attachments=att,
+                link=link,
+                format=format,
+                menu_bar=False,
+            )
+
     async def send_message(
         self,
         user_id: int,
         text: str,
         *,
+        chat_id: int | None = None,
         attachments: list[dict[str, Any]] | None = None,
         link: dict[str, Any] | None = None,
         format: str = "html",
+        menu_bar: bool = True,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"text": text, "format": format}
+        if menu_bar:
+            attachments = ensure_menu_bar(attachments)
+        attachments = normalize_inline_keyboard_attachments(attachments)
         if attachments:
             body["attachments"] = attachments
         if link:
             body["link"] = link
-        return await self._request(
+        params: dict[str, Any] = {}
+        if chat_id is not None:
+            params["chat_id"] = chat_id
+        else:
+            params["user_id"] = user_id
+        result = await self._request(
             "POST",
             "/messages",
-            params={"user_id": user_id},
+            params=params,
             json=body,
         )
+        if isinstance(result, dict):
+            msg = result.get("message")
+            if isinstance(msg, dict):
+                recipient = msg.get("recipient") if isinstance(msg.get("recipient"), dict) else {}
+                cid = recipient.get("chat_id")
+                uid = recipient.get("user_id") or user_id
+                if cid is not None and uid is not None:
+                    try:
+                        from app.services.dialog_inbox_poll import remember_dialog_chat
+
+                        remember_dialog_chat(int(uid), int(cid))
+                    except Exception:
+                        pass
+        return result
 
     async def forward_message(self, user_id: int, forward_mid: str) -> dict[str, Any]:
         last_error: MaxApiError | None = None
@@ -179,18 +293,37 @@ class MaxClient:
         *,
         message: dict[str, Any] | None = None,
         notification: str | None = None,
+        menu_bar: bool = True,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {}
         if message:
-            body["message"] = message
-        if notification:
+            msg = dict(message)
+            if menu_bar and msg.get("attachments"):
+                msg["attachments"] = ensure_menu_bar(msg["attachments"])
+            body["message"] = msg
+        if notification is not None and str(notification).strip():
             body["notification"] = notification
+        if not body:
+            body["notification"] = "\u200b"
         return await self._request(
             "POST",
             "/answers",
             params={"callback_id": callback_id},
-            json=body or None,
+            json=body,
         )
+
+    async def get_updates(
+        self,
+        *,
+        marker: int | None = None,
+        limit: int = 100,
+        timeout: int = 25,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"limit": limit, "timeout": timeout}
+        if marker is not None:
+            params["marker"] = marker
+        result = await self._request("GET", "/updates", params=params)
+        return result if isinstance(result, dict) else {"updates": result or []}
 
     async def subscribe_webhook(
         self,
@@ -201,6 +334,7 @@ class MaxClient:
     ) -> dict[str, Any]:
         types = update_types or [
             "bot_added",
+            "bot_removed",
             "bot_started",
             "bot_stopped",
             "message_created",
@@ -220,6 +354,110 @@ class MaxClient:
 
 
 max_client = MaxClient()
+
+MENU_OPEN_PAYLOAD = "menu_open"
+MENU_BUTTON_TEXT = "📋 Меню"
+MENU_MESSAGE_TEXT = "меню"
+
+
+def message_button(text: str) -> dict[str, str]:
+    return {"type": "message", "text": text}
+
+BOT_COMMANDS: list[dict[str, str]] = [
+    {"name": "menu", "description": "Главное меню"},
+    {"name": "appeal", "description": "Новое обращение"},
+    {"name": "help", "description": "Помощь и подсказки"},
+    {"name": "profile", "description": "Профиль и адрес"},
+    {"name": "events", "description": "Мероприятия"},
+    {"name": "polls", "description": "Опросы"},
+    {"name": "utilities", "description": "Обращение по ЖКХ"},
+]
+
+
+def _is_menu_trigger_button(button: dict[str, Any]) -> bool:
+    if button.get("type") == "callback" and str(button.get("payload") or "") == MENU_OPEN_PAYLOAD:
+        return True
+    if button.get("type") == "message":
+        label = str(button.get("text") or button.get("payload") or "").strip().lower()
+        return label in {"меню", "menu", "/menu"}
+    return False
+
+
+def _keyboard_has_menu_button(buttons: list[list[dict[str, Any]]]) -> bool:
+    for row in buttons:
+        for button in row:
+            if _is_menu_trigger_button(button):
+                return True
+    return False
+
+
+def _normalize_keyboard_buttons(buttons: list[list[dict[str, Any]]]) -> list[list[dict[str, Any]]]:
+    normalized: list[list[dict[str, Any]]] = []
+    for row in buttons:
+        new_row: list[dict[str, Any]] = []
+        for button in row:
+            btn = dict(button)
+            if btn.get("type") == "callback" and "intent" not in btn:
+                btn["intent"] = "default"
+            new_row.append(btn)
+        normalized.append(new_row)
+    return normalized
+
+
+def normalize_inline_keyboard_attachments(
+    attachments: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]] | None:
+    if not attachments:
+        return attachments
+    result: list[dict[str, Any]] = []
+    for item in attachments:
+        if item.get("type") != "inline_keyboard":
+            result.append(item)
+            continue
+        payload = dict(item.get("payload") or {})
+        buttons = payload.get("buttons")
+        if isinstance(buttons, list):
+            payload["buttons"] = _normalize_keyboard_buttons([list(row) for row in buttons])
+        result.append({**item, "payload": payload})
+    return result
+
+
+def menu_bar_keyboard() -> list[dict[str, Any]]:
+    return normalize_inline_keyboard_attachments(
+        [
+            {
+                "type": "inline_keyboard",
+                "payload": {
+                    "buttons": [
+                        [{"type": "callback", "text": MENU_BUTTON_TEXT, "payload": MENU_OPEN_PAYLOAD}],
+                    ],
+                },
+            }
+        ]
+    ) or []
+
+
+def ensure_menu_bar(attachments: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    if not attachments:
+        return menu_bar_keyboard()
+
+    merged = [dict(item) for item in attachments]
+    for item in merged:
+        if item.get("type") != "inline_keyboard":
+            continue
+        payload = dict(item.get("payload") or {})
+        buttons = [list(row) for row in payload.get("buttons") or []]
+        if _keyboard_has_menu_button(buttons):
+            return merged
+        buttons.append([{"type": "callback", "text": MENU_BUTTON_TEXT, "payload": MENU_OPEN_PAYLOAD}])
+        item["payload"] = {**payload, "buttons": buttons}
+        return merged
+
+    return [*merged, *menu_bar_keyboard()]
+
+
+async def setup_bot_commands() -> None:
+    await max_client.set_commands(BOT_COMMANDS)
 
 
 def consent_keyboard() -> list[dict[str, Any]]:
@@ -252,6 +490,150 @@ def contact_keyboard() -> list[dict[str, Any]]:
     ]
 
 
+def flow_cancel_keyboard(cancel_payload: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "inline_keyboard",
+            "payload": {
+                "buttons": [
+                    [{"type": "callback", "text": "Отмена", "payload": cancel_payload}],
+                ],
+            },
+        }
+    ]
+
+
+def append_cancel_row(
+    attachments: list[dict[str, Any]] | None,
+    cancel_payload: str,
+) -> list[dict[str, Any]]:
+    cancel_row = [{"type": "callback", "text": "Отмена", "payload": cancel_payload}]
+    if not attachments:
+        return flow_cancel_keyboard(cancel_payload)
+
+    result: list[dict[str, Any]] = []
+    merged = False
+    for item in attachments:
+        item_copy = dict(item)
+        if item_copy.get("type") != "inline_keyboard":
+            result.append(item_copy)
+            continue
+        payload = dict(item_copy.get("payload") or {})
+        buttons = [list(row) for row in payload.get("buttons") or []]
+        if any(btn.get("payload") == cancel_payload for row in buttons for btn in row):
+            return attachments
+        buttons.append(cancel_row)
+        item_copy["payload"] = {**payload, "buttons": buttons}
+        result.append(item_copy)
+        merged = True
+    if not merged:
+        result.extend(flow_cancel_keyboard(cancel_payload))
+    return result
+
+
+def appeal_cancel_keyboard() -> list[dict[str, Any]]:
+    return flow_cancel_keyboard("appeal_cancel")
+
+
+def appeal_attach_keyboard() -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "inline_keyboard",
+            "payload": {
+                "buttons": [
+                    [
+                        {"type": "callback", "text": "Отправить", "payload": "appeal_submit"},
+                        {"type": "callback", "text": "Отмена", "payload": "appeal_cancel"},
+                    ],
+                ],
+            },
+        }
+    ]
+
+
+def transport_cancel_keyboard() -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "inline_keyboard",
+            "payload": {
+                "buttons": [
+                    [
+                        {"type": "callback", "text": "Отмена", "payload": "transport_cancel"},
+                        message_button("отмена"),
+                    ],
+                ],
+            },
+        }
+    ]
+
+
+def profile_cancel_keyboard() -> list[dict[str, Any]]:
+    return flow_cancel_keyboard("profile_cancel")
+
+
+def appeal_operator_cancel_keyboard() -> list[dict[str, Any]]:
+    return flow_cancel_keyboard("appeal_operator_cancel")
+
+
+def service_note_cancel_keyboard() -> list[dict[str, Any]]:
+    return flow_cancel_keyboard("service_note_cancel")
+
+
+def service_note_it_notify_keyboard() -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "inline_keyboard",
+            "payload": {
+                "buttons": [
+                    [
+                        {
+                            "type": "callback",
+                            "text": "🛠 Заявки ИТ",
+                            "payload": "menu_service_notes_ops",
+                        }
+                    ],
+                ],
+            },
+        }
+    ]
+
+
+def service_note_attach_keyboard() -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "inline_keyboard",
+            "payload": {
+                "buttons": [
+                    [
+                        {"type": "callback", "text": "Отправить", "payload": "service_note_submit"},
+                        {"type": "callback", "text": "Отмена", "payload": "service_note_cancel"},
+                    ],
+                ],
+            },
+        }
+    ]
+
+
+def service_note_operator_cancel_keyboard() -> list[dict[str, Any]]:
+    return flow_cancel_keyboard("service_note_operator_cancel")
+
+
+def service_note_user_review_keyboard(note_id: int) -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "inline_keyboard",
+            "payload": {
+                "buttons": [
+                    [
+                        {"type": "callback", "text": "Принять работу", "payload": f"sn_user_accept_{note_id}"},
+                        {"type": "callback", "text": "Проблема осталась", "payload": f"sn_user_reject_{note_id}"},
+                    ],
+                ],
+            },
+        }
+    ]
+
+
 def utilities_disclaimer_keyboard() -> list[dict[str, Any]]:
     return [
         {
@@ -259,7 +641,7 @@ def utilities_disclaimer_keyboard() -> list[dict[str, Any]]:
             "payload": {
                 "buttons": [
                     [{"type": "callback", "text": "Продолжить", "payload": "utilities_continue"}],
-                    [{"type": "callback", "text": "Отмена", "payload": "utilities_cancel"}],
+                    [{"type": "callback", "text": "Отмена", "payload": "appeal_cancel"}],
                 ]
             },
         }
@@ -296,6 +678,7 @@ def transport_confirm_keyboard() -> list[dict[str, Any]]:
                     [
                         {"type": "callback", "text": "Отправить заявку", "payload": "transport_confirm"},
                         {"type": "callback", "text": "Отмена", "payload": "transport_cancel"},
+                        message_button("отмена"),
                     ]
                 ]
             },
@@ -309,6 +692,7 @@ def main_menu_keyboard(*, registered: bool, user: Any | None = None) -> list[dic
         user_can_order_transport,
         user_is_appeals_operator,
         user_is_garage_operator,
+        user_is_it_operator,
     )
 
     buttons: list[list[dict[str, Any]]] = [
@@ -327,12 +711,11 @@ def main_menu_keyboard(*, registered: bool, user: Any | None = None) -> list[dic
             buttons.append(
                 [{"type": "callback", "text": "📋 Обращения", "payload": "menu_appeals_ops"}]
             )
-        buttons.append(
-            [
-                {"type": "callback", "text": "Обращение", "payload": "menu_appeal"},
-                {"type": "callback", "text": "ЖКХ", "payload": "menu_utilities"},
-            ]
-        )
+        if user and user_is_it_operator(user):
+            buttons.append(
+                [{"type": "callback", "text": "🛠 Заявки ИТ", "payload": "menu_service_notes_ops"}]
+            )
+        buttons.append([{"type": "callback", "text": "Обращение", "payload": "menu_appeal"}])
         buttons.append(
             [
                 {"type": "callback", "text": "Мероприятия", "payload": "menu_events"},
@@ -340,9 +723,7 @@ def main_menu_keyboard(*, registered: bool, user: Any | None = None) -> list[dic
             ]
         )
         buttons.append(
-            [
-                {"type": "callback", "text": "Подписки", "payload": "menu_subscriptions"},
-            ]
+            [{"type": "callback", "text": "Подписки", "payload": "menu_subscriptions"}]
         )
         buttons.append(
             [
@@ -350,12 +731,15 @@ def main_menu_keyboard(*, registered: bool, user: Any | None = None) -> list[dic
                 {"type": "callback", "text": "Профиль", "payload": "menu_profile"},
             ]
         )
-    return [
-        {
-            "type": "inline_keyboard",
-            "payload": {"buttons": buttons},
-        }
-    ]
+    buttons.append([{"type": "callback", "text": MENU_BUTTON_TEXT, "payload": MENU_OPEN_PAYLOAD}])
+    return normalize_inline_keyboard_attachments(
+        [
+            {
+                "type": "inline_keyboard",
+                "payload": {"buttons": buttons},
+            }
+        ]
+    ) or []
 
 
 def topic_subscriptions_keyboard(

@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     max_api_verify_ssl: bool = True
 
     news_source_chat_id: int | None = None
+    outage_source_chat_id: int | None = None
 
     dadata_api_key: str = ""
     dadata_secret_key: str = ""
@@ -27,8 +28,18 @@ class Settings(BaseSettings):
     # Сервисный доступ для admspgo.ru (read-only overview). Пусто — эндпоинты /internal/v1 отключены.
     internal_api_token: str = ""
 
-    admspgo_api_url: str = "https://admspgo.ru"
+    # Опционально: внешний API (обращения, справочник, опросы). Пусто — только локальные функции бота.
+    admspgo_api_url: str = ""
     admspgo_internal_token: str = ""
+
+    # Если MAX не шлёт webhook по dialog (известный баг у части аккаунтов), подхватываем GET /messages.
+    dialog_inbox_poll_enabled: bool = True
+    dialog_inbox_poll_interval_sec: float = 2.0
+    dialog_inbox_poll_chat_ids: str = ""
+
+    # Long polling /updates параллельно webhook (callback-кнопки у части аккаунтов).
+    max_updates_poll_enabled: bool = True
+    max_updates_poll_timeout_sec: int = 20
 
 
 settings = Settings()

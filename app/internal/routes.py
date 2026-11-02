@@ -14,7 +14,19 @@ from app.config import settings
 from app.database import async_session, get_session
 from app.internal.auth import require_internal_api_token
 from app.max_client import max_client
-from app.models import AdminRole, AdminUser, Broadcast, Driver, NewsChannelSource, Screenshot, TransportOrder, User, Vehicle
+from app.models import (
+    AdminRole,
+    AdminUser,
+    BotChat,
+    Broadcast,
+    Driver,
+    NewsChannelSource,
+    Screenshot,
+    ServiceNote,
+    TransportOrder,
+    User,
+    Vehicle,
+)
 from app.services.broadcast import encode_districts, encode_topics, send_broadcast
 from app.services.audience_roles import (
     AUDIENCE_ROLES,
@@ -23,9 +35,20 @@ from app.services.audience_roles import (
     user_is_appeals_operator,
 )
 from app.services.broadcast_media import upload_broadcast_image, validate_broadcast_image
-from app.services.channel_news import get_news_channel_source
+from app.services.bot_chats import discover_chats_from_api, refresh_all_bot_chats, serialize_bot_chat
+from app.services.outage_chat_ingest import get_outage_source_status, poll_outage_chat_messages
+from app.services.channel_news import effective_source_chat_id, get_news_channel_source
 from app.services.user_admin import delete_user_record
+from app.services.service_note_service import parse_note_attachments
 from app.services.transport_service import format_trip_date
+
+SERVICE_NOTE_STATUS_LABELS = {
+    "new": "Новая",
+    "in_progress": "В работе",
+    "awaiting_user": "Ожидает приёмки",
+    "reopened": "Возвращена",
+    "archived": "Архив",
+}
 from app.utils.password import hash_password
 
 logger = logging.getLogger(__name__)
@@ -198,7 +221,7 @@ class NotifyOperatorsBody(BaseModel):
 
 
 class UpdateUserAudienceRolesBody(BaseModel):
-    audienceRoles: list[str] = Field(min_length=1, max_length=8)
+    audienceRoles: list[str] = Field(min_length=1, max_length=16)
 
 
 @router.get("/audience-roles")
@@ -594,6 +617,125 @@ async def toggle_news_channel(
     }
 
 
+@router.get("/bot-chats")
+async def list_bot_chats(
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    source = await get_news_channel_source(session)
+    news_chat_id = effective_source_chat_id(source)
+    chats = (
+        await session.scalars(select(BotChat).order_by(BotChat.added_at.desc()))
+    ).all()
+    active = [c for c in chats if (c.status or "active") == "active"]
+    return {
+        "chats": [serialize_bot_chat(chat, news_source_chat_id=news_chat_id) for chat in chats],
+        "summary": {
+            "total": len(chats),
+            "active": len(active),
+            "channels": sum(1 for c in active if c.is_channel or c.chat_type == "channel"),
+            "groups": sum(1 for c in active if not c.is_channel and c.chat_type != "channel"),
+        },
+        "note": (
+            "MAX API не отдаёт полный список чатов. Список пополняется при событиях "
+            "bot_added / bot_removed и при привязке канала автоновостей."
+        ),
+    }
+
+
+@router.post("/bot-chats/discover")
+async def discover_bot_chats(
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    discovered, total, error = await discover_chats_from_api(session)
+    await session.commit()
+    source = await get_news_channel_source(session)
+    news_chat_id = effective_source_chat_id(source)
+    chats = (
+        await session.scalars(select(BotChat).order_by(BotChat.added_at.desc()))
+    ).all()
+    payload = {
+        "discovered": discovered,
+        "total": total,
+        "error": error,
+        "chats": [serialize_bot_chat(chat, news_source_chat_id=news_chat_id) for chat in chats],
+        "summary": {
+            "total": len(chats),
+            "active": sum(1 for c in chats if (c.status or "active") == "active"),
+            "channels": sum(
+                1
+                for c in chats
+                if (c.status or "active") == "active" and (c.is_channel or c.chat_type == "channel")
+            ),
+            "groups": sum(
+                1
+                for c in chats
+                if (c.status or "active") == "active" and not c.is_channel and c.chat_type != "channel"
+            ),
+        },
+        "note": (
+            "MAX API не отдаёт полный список чатов. Список пополняется при событиях "
+            "bot_added / bot_removed и при привязке канала автоновостей."
+        ),
+    }
+    if error and not chats:
+        payload["warning"] = (
+            "Сканирование через GET /chats недоступно. Добавьте бота в группу заново "
+            "или дождитесь сообщения в чате — chat_id сохранится автоматически."
+        )
+    return payload
+
+
+@router.post("/bot-chats/refresh")
+async def refresh_bot_chats(
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    ok_count, total = await refresh_all_bot_chats(session)
+    await session.commit()
+    source = await get_news_channel_source(session)
+    news_chat_id = effective_source_chat_id(source)
+    chats = (
+        await session.scalars(select(BotChat).order_by(BotChat.added_at.desc()))
+    ).all()
+    return {
+        "refreshed": ok_count,
+        "total": total,
+        "chats": [serialize_bot_chat(chat, news_source_chat_id=news_chat_id) for chat in chats],
+        "summary": {
+            "total": len(chats),
+            "active": sum(1 for c in chats if (c.status or "active") == "active"),
+            "channels": sum(
+                1
+                for c in chats
+                if (c.status or "active") == "active" and (c.is_channel or c.chat_type == "channel")
+            ),
+            "groups": sum(
+                1
+                for c in chats
+                if (c.status or "active") == "active" and not c.is_channel and c.chat_type != "channel"
+            ),
+        },
+        "note": (
+            "MAX API не отдаёт полный список чатов. Список пополняется при событиях "
+            "bot_added / bot_removed и при привязке канала автоновостей."
+        ),
+    }
+
+
+@router.get("/outage-source/status")
+async def outage_source_status(_: None = Depends(require_internal_api_token)) -> dict:
+    return await get_outage_source_status()
+
+
+@router.post("/outage-source/poll")
+async def outage_source_poll(_: None = Depends(require_internal_api_token)) -> dict:
+    forwarded = await poll_outage_chat_messages()
+    status = await get_outage_source_status()
+    return {"forwarded": forwarded, "sourceStatus": status}
+
+
 class VehicleBody(BaseModel):
     plateNumber: str = Field(min_length=3, max_length=32)
     makeModel: str = Field(min_length=2, max_length=255)
@@ -778,6 +920,95 @@ async def list_transport_orders(
             }
         )
     return {"orders": items}
+
+
+@router.get("/service-notes")
+async def list_service_notes(
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+    status: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> dict:
+    query = select(ServiceNote).order_by(ServiceNote.created_at.desc()).limit(limit)
+    if status:
+        query = query.where(ServiceNote.status == status)
+    result = await session.execute(query)
+    items = []
+    for note in result.scalars().all():
+        requester = await session.get(User, note.requester_id)
+        operator = await session.get(User, note.operator_id) if note.operator_id else None
+        attachment_count = len(parse_note_attachments(note.attachments))
+        items.append(
+            {
+                "id": note.id,
+                "status": note.status,
+                "statusLabel": SERVICE_NOTE_STATUS_LABELS.get(note.status, note.status),
+                "department": note.department,
+                "roomNumber": note.room_number,
+                "message": note.message,
+                "attachmentCount": attachment_count,
+                "requesterFio": requester.fio if requester else None,
+                "requesterPhone": requester.phone if requester else None,
+                "operatorFio": operator.fio if operator else None,
+                "resolutionComment": note.resolution_comment,
+                "createdAt": _iso(note.created_at),
+                "assignedAt": _iso(note.assigned_at),
+                "resolvedAt": _iso(note.resolved_at),
+                "archivedAt": _iso(note.archived_at),
+            }
+        )
+    return {"notes": items}
+
+
+class ServiceNoteDeliveryFile(BaseModel):
+    fileName: str = Field(min_length=1, max_length=255)
+    url: str = Field(min_length=8, max_length=2000)
+
+
+class ServiceNoteExternalSyncBody(BaseModel):
+    status: str = Field(min_length=3, max_length=24)
+    resolutionComment: str | None = Field(default=None, max_length=4000)
+    operatorFio: str | None = Field(default=None, max_length=500)
+    source: str | None = Field(default=None, max_length=32)
+    deliveryFiles: list[ServiceNoteDeliveryFile] | None = None
+
+
+@router.patch("/service-notes/{note_id}/external-sync")
+async def external_sync_service_note(
+    note_id: int,
+    body: ServiceNoteExternalSyncBody,
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    from app.services.service_note_external_sync import apply_service_note_external_sync
+
+    try:
+        note = await apply_service_note_external_sync(
+            session,
+            note_id=note_id,
+            status=body.status,
+            resolution_comment=body.resolutionComment,
+            operator_fio=body.operatorFio,
+            delivery_files=[f.model_dump() for f in (body.deliveryFiles or [])],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"ok": True, "noteId": note.id, "status": note.status}
+
+
+@router.delete("/service-notes/{note_id}")
+async def delete_service_note(
+    note_id: int,
+    _: None = Depends(require_internal_api_token),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    note = await session.get(ServiceNote, note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="Заявка не найдена")
+    await session.delete(note)
+    await session.commit()
+    return {"success": True, "deletedNoteId": note_id}
 
 
 @router.delete("/transport/orders/{order_id}")

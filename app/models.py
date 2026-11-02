@@ -77,6 +77,15 @@ class User(Base):
     appeal_operator_appeal_id: Mapped[str | None] = mapped_column(String(64))
     appeal_operator_target_status: Mapped[str | None] = mapped_column(String(16))
 
+    service_note_flow_state: Mapped[str | None] = mapped_column(String(16), default="none")
+    service_note_draft_department: Mapped[str | None] = mapped_column(String(32))
+    service_note_draft_room: Mapped[str | None] = mapped_column(String(64))
+    service_note_draft_message: Mapped[str | None] = mapped_column(Text)
+    service_note_draft_attachments: Mapped[str | None] = mapped_column(Text)
+
+    service_note_operator_flow_state: Mapped[str | None] = mapped_column(String(16), default="none")
+    service_note_operator_ticket_id: Mapped[int | None] = mapped_column(Integer)
+
     pending_screenshot_broadcast_id: Mapped[int | None] = mapped_column(
         ForeignKey("broadcasts.id"), nullable=True, index=True
     )
@@ -192,6 +201,25 @@ class AdminRole(str, enum.Enum):
     BROADCASTER = "broadcaster"
 
 
+class BotChat(Base):
+    __tablename__ = "bot_chats"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
+    chat_type: Mapped[str] = mapped_column(String(16), default="chat")
+    title: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    is_channel: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False)
+    link: Mapped[str | None] = mapped_column(String(512))
+    description: Mapped[str | None] = mapped_column(Text)
+    participants_count: Mapped[int | None] = mapped_column(Integer)
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class NewsChannelSource(Base):
     __tablename__ = "news_channel_sources"
 
@@ -297,4 +325,30 @@ class TransportOrder(Base):
     requester: Mapped["User"] = relationship(foreign_keys=[requester_id])
     vehicle: Mapped["Vehicle | None"] = relationship(back_populates="orders")
     driver: Mapped["Driver | None"] = relationship(back_populates="orders")
+    operator: Mapped["User | None"] = relationship(foreign_keys=[operator_id])
+
+
+class ServiceNote(Base):
+    __tablename__ = "service_notes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    requester_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    department: Mapped[str] = mapped_column(String(32), default="it", index=True)
+    room_number: Mapped[str] = mapped_column(String(64))
+    message: Mapped[str] = mapped_column(Text)
+    attachments: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(24), default="new", index=True)
+    operator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolution_comment: Mapped[str | None] = mapped_column(Text)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    requester: Mapped["User"] = relationship(foreign_keys=[requester_id])
     operator: Mapped["User | None"] = relationship(foreign_keys=[operator_id])

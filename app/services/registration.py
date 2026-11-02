@@ -35,6 +35,7 @@ from app.texts import (
     SCREENSHOT_RECEIVED,
     WELCOME_TEXT,
 )
+from app.utils.bot_command import normalize_bot_command
 from app.services.admspgo_directory import try_directory_command
 from app.services.bot_menu import send_main_menu, try_handle_menu_callback
 from app.services.event_flow import try_handle_event_callback
@@ -48,7 +49,6 @@ from app.services.profile_flow import (
     try_handle_profile_callback,
 )
 from app.services.appeal_flow import (
-    APPEAL_CATEGORY_UTILITIES,
     APPEAL_FLOW_NONE,
     handle_appeal_flow_message,
     send_appeal_hint,
@@ -71,7 +71,7 @@ async def get_or_create_user(session: AsyncSession, update: dict[str, Any]) -> U
     if not user_data:
         return None
 
-    max_user_id = user_data.get("user_id")
+    max_user_id = user_data.get("user_id") or user_data.get("id")
     if not max_user_id:
         return None
 
@@ -109,22 +109,95 @@ async def start_registration(session: AsyncSession, user: User) -> None:
 
 
 async def handle_callback(session: AsyncSession, update: dict[str, Any]) -> None:
+    from app.utils.callback_payload import resolve_callback_payload
+    from app.utils.dialog_target import dialog_target_from_update
+
     callback = update.get("callback") or {}
-    payload = callback.get("payload", "")
+    payload = resolve_callback_payload(update)
     callback_id = callback.get("callback_id")
+    chat_id, _ = dialog_target_from_update(update)
     user = await get_or_create_user(session, update)
+    cb_id = str(callback_id) if callback_id else None
+
     if not user:
+        logger.warning(
+            "callback without user payload=%r keys=%s",
+            payload,
+            list(callback.keys()),
+        )
+        if cb_id:
+            try:
+                await max_client.answer_callback(cb_id)
+            except Exception:
+                logger.exception("failed to ack orphan callback")
         return
 
-    from app.services.callback_guard import is_debounced_action, is_duplicate_callback
+    from app.services.callback_guard import (
+        is_debounced_action,
+        is_duplicate_callback,
+        mark_callback_handled,
+    )
 
-    if callback_id and is_duplicate_callback(str(callback_id)):
-        await max_client.answer_callback(str(callback_id), notification="Принято")
+    logger.info(
+        "callback max_user_id=%s payload=%r chat_id=%s",
+        user.max_user_id,
+        payload,
+        chat_id,
+    )
+
+    from app.services.bot_menu import MENU_PAYLOADS
+
+    if cb_id and is_duplicate_callback(cb_id):
+        if payload in MENU_PAYLOADS:
+            await _dispatch_callback(session, user, payload, cb_id, chat_id)
+        else:
+            try:
+                await max_client.answer_callback(cb_id)
+            except Exception:
+                pass
         return
 
-    if callback_id and is_debounced_action(user.max_user_id, payload):
-        await max_client.answer_callback(str(callback_id), notification="Принято")
+    if cb_id and is_debounced_action(user.max_user_id, payload):
+        try:
+            await max_client.answer_callback(cb_id)
+        except Exception:
+            pass
         return
+
+    try:
+        await _dispatch_callback(session, user, payload, cb_id, chat_id)
+        if cb_id:
+            mark_callback_handled(cb_id)
+    except Exception:
+        if cb_id:
+            try:
+                await max_client.answer_callback(cb_id)
+            except Exception:
+                pass
+        raise
+
+
+async def _dispatch_callback(
+    session: AsyncSession,
+    user: User,
+    payload: str,
+    cb_id: str | None,
+    chat_id: int | None = None,
+) -> None:
+    from app.services.bot_menu import try_handle_menu_callback
+
+    from app.services.bot_menu import MENU_PAYLOADS
+
+    # Меню и списки операторов — приоритетно, до длинной цепочки flow-обработчиков.
+    if payload in MENU_PAYLOADS:
+        if await try_handle_menu_callback(
+            session,
+            user,
+            payload,
+            callback_id=cb_id,
+            chat_id=chat_id,
+        ):
+            return
 
     if payload == "consent_yes":
         if user.is_registered:
@@ -173,24 +246,51 @@ async def handle_callback(session: AsyncSession, update: dict[str, Any]) -> None
     if await try_handle_appeal_callback(session, user, payload):
         return
 
+    from app.services.service_note_flow import try_handle_service_note_callback
+
+    if await try_handle_service_note_callback(session, user, payload):
+        return
+
     from app.services.transport_order_flow import try_handle_transport_callback
     from app.services.transport_operator_flow import try_handle_transport_operator_callback
     from app.services.appeal_operator_flow import try_handle_appeal_operator_callback
 
-    if await try_handle_transport_callback(session, user, payload):
+    if await try_handle_transport_callback(
+        session,
+        user,
+        payload,
+        callback_id=cb_id,
+    ):
         return
 
-    if await try_handle_transport_operator_callback(session, user, payload, callback_id=str(callback_id) if callback_id else None):
+    if await try_handle_transport_operator_callback(session, user, payload, callback_id=cb_id):
         return
 
-    if await try_handle_appeal_operator_callback(session, user, payload, callback_id=str(callback_id) if callback_id else None):
+    if await try_handle_appeal_operator_callback(session, user, payload, callback_id=cb_id):
         return
 
-    if await try_handle_menu_callback(session, user, payload):
+    from app.services.service_note_operator_flow import try_handle_service_note_operator_callback
+
+    if await try_handle_service_note_operator_callback(
+        session,
+        user,
+        payload,
+        callback_id=cb_id,
+        chat_id=chat_id,
+    ):
         return
 
-    if callback_id:
-        await max_client.answer_callback(str(callback_id), notification="Принято")
+    if await try_handle_menu_callback(
+        session,
+        user,
+        payload,
+        callback_id=cb_id,
+        chat_id=chat_id,
+    ):
+        return
+
+    if cb_id:
+        await max_client.answer_callback(cb_id)
 
 
 async def handle_message_created(session: AsyncSession, update: dict[str, Any]) -> None:
@@ -199,10 +299,14 @@ async def handle_message_created(session: AsyncSession, update: dict[str, Any]) 
     text = (body.get("text") or "").strip()
     attachments = body.get("attachments") or []
 
+    from app.utils.dialog_target import dialog_target_from_update
+
     user = await get_or_create_user(session, update)
     if not user:
         logger.warning("message_created without user: %s", update)
         return
+
+    chat_id, _ = dialog_target_from_update(update)
 
     logger.info(
         "message from %s state=%s text=%r attachments=%s",
@@ -214,16 +318,18 @@ async def handle_message_created(session: AsyncSession, update: dict[str, Any]) 
 
     if text and await try_directory_command(user.max_user_id, text):
         if user.is_registered:
-            await send_main_menu(user.max_user_id, registered=True, user=user)
+            await send_main_menu(user.max_user_id, registered=True, user=user, chat_id=chat_id)
         else:
-            await send_main_menu(user.max_user_id, registered=False)
+            await send_main_menu(user.max_user_id, registered=False, chat_id=chat_id)
         return
 
     if text:
-        cmd = text.lower().strip()
-        if cmd in {"меню", "menu"}:
-            await send_main_menu(user.max_user_id, registered=user.is_registered, user=user)
+        from app.services.text_commands import try_handle_text_command
+
+        if await try_handle_text_command(session, user, text, chat_id=chat_id):
             return
+
+        cmd = normalize_bot_command(text)
         if cmd in {"помощь", "help"} and not user.is_registered:
             await max_client.send_message(
                 user.max_user_id,
@@ -234,14 +340,25 @@ async def handle_message_created(session: AsyncSession, update: dict[str, Any]) 
 
     if user.is_registered:
         from app.services.appeal_operator_flow import handle_appeal_operator_message, in_appeal_operator_flow
+        from app.services.service_note_flow import handle_service_note_flow_message, in_service_note_flow
+        from app.services.service_note_operator_flow import (
+            handle_service_note_operator_message,
+            in_service_note_operator_flow,
+        )
         from app.services.transport_order_flow import handle_transport_flow_message, in_transport_flow
 
         in_appeal = (user.appeal_flow_state or APPEAL_FLOW_NONE) != APPEAL_FLOW_NONE
         if in_profile_flow(user) and (text or attachments):
             if await handle_profile_flow_message(session, user, text, attachments):
                 return
+        if in_service_note_operator_flow(user) and text:
+            if await handle_service_note_operator_message(session, user, text):
+                return
         if in_appeal_operator_flow(user) and text:
             if await handle_appeal_operator_message(session, user, text):
+                return
+        if in_service_note_flow(user) and (text or attachments):
+            if await handle_service_note_flow_message(session, user, text, attachments):
                 return
         if in_transport_flow(user) and text:
             if await handle_transport_flow_message(session, user, text):
@@ -249,11 +366,16 @@ async def handle_message_created(session: AsyncSession, update: dict[str, Any]) 
         if in_appeal or text or attachments:
             if await handle_appeal_flow_message(session, user, text, attachments):
                 return
-        if not in_appeal and not in_profile_flow(user) and _has_image_attachment(attachments):
+        if (
+            not in_appeal
+            and not in_service_note_flow(user)
+            and not in_profile_flow(user)
+            and _has_image_attachment(attachments)
+        ):
             await _save_screenshot(session, user, message, attachments)
             return
         if text:
-            await _handle_registered_text(session, user, text)
+            await _handle_registered_text(session, user, text, chat_id=chat_id)
         return
 
     if user.state == RegistrationState.AWAITING_PHONE:
@@ -327,11 +449,29 @@ async def _process_address_input(session: AsyncSession, user: User, raw_address:
     await max_client.send_message(user.max_user_id, ASK_PHONE, attachments=contact_keyboard())
 
 
-async def _handle_registered_text(session: AsyncSession, user: User, text: str) -> None:
-    command = text.lower().strip()
-    if command in {"меню", "menu"}:
-        await send_main_menu(user.max_user_id, registered=True, user=user)
+async def _handle_registered_text(
+    session: AsyncSession,
+    user: User,
+    text: str,
+    *,
+    chat_id: int | None = None,
+) -> None:
+    command = normalize_bot_command(text)
+    if command in {"меню", "menu", "start"}:
+        await send_main_menu(
+            user.max_user_id,
+            registered=True,
+            user=user,
+            chat_id=chat_id,
+        )
         return
+    if command in {"заявки ит", "it", "it заявки", "заявки it"}:
+        from app.services.audience_roles import user_is_it_operator
+        from app.services.service_note_operator_flow import send_operator_notes_list
+
+        if user_is_it_operator(user):
+            await send_operator_notes_list(session, user, chat_id=chat_id)
+            return
     if command in {"мероприятия", "мероприятие", "events", "event"}:
         from app.services.event_flow import send_events_list
 
@@ -355,7 +495,7 @@ async def _handle_registered_text(session: AsyncSession, user: User, text: str) 
         await try_start_appeal_flow(session, user)
         return
     if command in {"жкх", "jkh", "utilities", "коммуналка"}:
-        await try_start_appeal_flow(session, user, category=APPEAL_CATEGORY_UTILITIES)
+        await try_start_appeal_flow(session, user, category="UTILITIES")
         return
     if command in {"помощь", "help"}:
         await max_client.send_message(

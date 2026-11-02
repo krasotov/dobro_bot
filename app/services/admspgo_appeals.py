@@ -10,6 +10,18 @@ from app.services.appeal_attachments import guess_mime
 
 logger = logging.getLogger(__name__)
 
+_API_ERROR_RU = {
+    "Required": "Не хватает обязательных данных. Попробуйте отправить ещё раз.",
+    "Invalid enum value": "Тематика обращения пока не поддерживается сервером. Обратитесь в администрацию.",
+}
+
+
+def _humanize_api_error(message: str) -> str:
+    for key, text in _API_ERROR_RU.items():
+        if key in message:
+            return text
+    return message
+
 
 async def submit_max_appeal(
     payload: dict[str, Any],
@@ -47,7 +59,7 @@ async def submit_max_appeal(
     try:
         data = response.json()
         if isinstance(data, dict) and isinstance(data.get("error"), str):
-            detail = data["error"]
+            detail = _humanize_api_error(data["error"])
     except Exception:
         pass
     logger.warning("admspgo appeal rejected: %s %s", response.status_code, response.text[:300])
@@ -153,19 +165,12 @@ async def update_appeal(
 
 
 async def download_attachment(meta: dict[str, Any]) -> tuple[str, bytes, str] | None:
+    from app.services.appeal_attachments import download_max_attachment
+
+    result = await download_max_attachment(meta)
+    if result:
+        return result
     url = meta.get("url")
-    if not url or not isinstance(url, str):
-        return None
-    filename = str(meta.get("filename") or "photo.jpg")[:200]
-    try:
-        async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            content = response.content
-            if len(content) > 10 * 1024 * 1024:
-                return None
-            mime = response.headers.get("content-type", "").split(";")[0].strip() or guess_mime(filename)
-            return filename, content, mime
-    except Exception:
-        logger.exception("Failed to download MAX attachment from %s", url[:120])
-        return None
+    if url:
+        logger.warning("Failed to download MAX attachment from %s", str(url)[:120])
+    return None

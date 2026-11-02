@@ -58,7 +58,33 @@ MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS appeal_operator_flow_state VARCHAR(16) DEFAULT 'none'",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS appeal_operator_appeal_id VARCHAR(64)",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS appeal_operator_target_status VARCHAR(16)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS service_note_flow_state VARCHAR(16) DEFAULT 'none'",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS service_note_draft_department VARCHAR(32)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS service_note_draft_room VARCHAR(64)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS service_note_draft_message TEXT",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS service_note_draft_attachments TEXT",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS service_note_operator_flow_state VARCHAR(16) DEFAULT 'none'",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS service_note_operator_ticket_id INTEGER",
 ]
+
+BOT_CHATS_TABLE = """
+CREATE TABLE IF NOT EXISTS bot_chats (
+    id SERIAL PRIMARY KEY,
+    chat_id BIGINT NOT NULL UNIQUE,
+    chat_type VARCHAR(16) NOT NULL DEFAULT 'chat',
+    title VARCHAR(255),
+    status VARCHAR(16) NOT NULL DEFAULT 'active',
+    is_channel BOOLEAN NOT NULL DEFAULT FALSE,
+    is_public BOOLEAN NOT NULL DEFAULT FALSE,
+    link VARCHAR(512),
+    description TEXT,
+    participants_count INTEGER,
+    added_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    removed_at TIMESTAMPTZ,
+    last_event_at TIMESTAMPTZ,
+    last_synced_at TIMESTAMPTZ
+)
+"""
 
 
 async def ensure_news_channel_source() -> None:
@@ -92,6 +118,30 @@ async def init_db() -> None:
             logger.warning("Migration skipped: %s (%s)", stmt[:80], exc)
 
     await ensure_news_channel_source()
+    await ensure_bot_chats_bootstrap()
+
+
+async def ensure_bot_chats_bootstrap() -> None:
+    from sqlalchemy import select
+
+    from app.models import BotChat, NewsChannelSource
+    from app.services.bot_chats import ensure_known_chat
+
+    async with async_session() as session:
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(text(BOT_CHATS_TABLE))
+        except Exception as exc:
+            logger.warning("bot_chats table bootstrap skipped: %s", exc)
+
+        source = await session.scalar(select(NewsChannelSource).limit(1))
+        if source and source.chat_id:
+            existing = await session.scalar(
+                select(BotChat.id).where(BotChat.chat_id == source.chat_id)
+            )
+            if not existing:
+                await ensure_known_chat(session, int(source.chat_id), is_channel=True)
+                await session.commit()
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

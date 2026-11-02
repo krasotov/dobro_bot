@@ -6,7 +6,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.max_client import contact_keyboard, main_menu_keyboard, max_client, profile_edit_keyboard
+from app.max_client import (
+    append_cancel_row,
+    contact_keyboard,
+    main_menu_keyboard,
+    max_client,
+    profile_cancel_keyboard,
+    profile_edit_keyboard,
+)
 from app.models import User
 from app.services.address import apply_address_to_user
 from app.services.bot_menu import send_main_menu
@@ -85,7 +92,14 @@ async def send_profile_panel(user: User) -> None:
 
 async def send_profile_or_block(session: AsyncSession, user: User, *, in_appeal: bool) -> None:
     if in_appeal:
-        await max_client.send_message(user.max_user_id, PROFILE_IN_APPEAL)
+        from app.max_client import appeal_cancel_keyboard
+
+        await max_client.send_message(
+            user.max_user_id,
+            PROFILE_IN_APPEAL,
+            attachments=appeal_cancel_keyboard(),
+            menu_bar=False,
+        )
         return
     _clear_profile_flow(user)
     await session.commit()
@@ -126,7 +140,12 @@ async def try_handle_profile_callback(session: AsyncSession, user: User, payload
             return False
         user.profile_flow_state = PROFILE_FLOW_PHONE_MANUAL
         await session.commit()
-        await max_client.send_message(user.max_user_id, ASK_PHONE_MANUAL)
+        await max_client.send_message(
+            user.max_user_id,
+            ASK_PHONE_MANUAL,
+            attachments=profile_cancel_keyboard(),
+            menu_bar=False,
+        )
         return True
 
     edit_map = {
@@ -139,13 +158,21 @@ async def try_handle_profile_callback(session: AsyncSession, user: User, payload
         from app.services.appeal_flow import APPEAL_FLOW_NONE
 
         if (user.appeal_flow_state or APPEAL_FLOW_NONE) != APPEAL_FLOW_NONE:
-            await max_client.send_message(user.max_user_id, PROFILE_IN_APPEAL)
+            from app.max_client import appeal_cancel_keyboard
+
+            await max_client.send_message(
+                user.max_user_id,
+                PROFILE_IN_APPEAL,
+                attachments=appeal_cancel_keyboard(),
+                menu_bar=False,
+            )
             return True
         state, prompt = edit_map[payload]
         user.profile_flow_state = state
         await session.commit()
-        attachments = contact_keyboard() if state == PROFILE_FLOW_PHONE else None
-        await max_client.send_message(user.max_user_id, prompt, attachments=attachments)
+        base = contact_keyboard() if state == PROFILE_FLOW_PHONE else None
+        attachments = append_cancel_row(base, "profile_cancel")
+        await max_client.send_message(user.max_user_id, prompt, attachments=attachments, menu_bar=False)
         return True
 
     return False
@@ -199,16 +226,29 @@ async def handle_profile_flow_message(
             return True
         if any(a.get("type") == "contact" for a in attachments):
             await max_client.send_message(
-                user.max_user_id, CONTACT_PARSE_FAILED, attachments=contact_keyboard()
+                user.max_user_id,
+                CONTACT_PARSE_FAILED,
+                attachments=append_cancel_row(contact_keyboard(), "profile_cancel"),
+                menu_bar=False,
             )
             return True
         if text:
-            await max_client.send_message(user.max_user_id, PHONE_REQUIRED, attachments=contact_keyboard())
+            await max_client.send_message(
+                user.max_user_id,
+                PHONE_REQUIRED,
+                attachments=append_cancel_row(contact_keyboard(), "profile_cancel"),
+                menu_bar=False,
+            )
         return True
 
     if state == PROFILE_FLOW_PHONE_MANUAL:
         if not text or not is_valid_phone_text(text):
-            await max_client.send_message(user.max_user_id, INVALID_PHONE)
+            await max_client.send_message(
+                user.max_user_id,
+                INVALID_PHONE,
+                attachments=profile_cancel_keyboard(),
+                menu_bar=False,
+            )
             return True
         if await _save_phone(session, user, text, verified=False):
             _clear_profile_flow(user)
@@ -222,7 +262,12 @@ async def handle_profile_flow_message(
 
     if state == PROFILE_FLOW_FIO:
         if not is_valid_fio(text):
-            await max_client.send_message(user.max_user_id, INVALID_FIO)
+            await max_client.send_message(
+                user.max_user_id,
+                INVALID_FIO,
+                attachments=profile_cancel_keyboard(),
+                menu_bar=False,
+            )
             return True
         user.fio = text.strip()
         _clear_profile_flow(user)
@@ -234,7 +279,12 @@ async def handle_profile_flow_message(
     if state == PROFILE_FLOW_BIRTH:
         birth_date = parse_birth_date(text)
         if birth_date is None:
-            await max_client.send_message(user.max_user_id, INVALID_BIRTH_DATE)
+            await max_client.send_message(
+                user.max_user_id,
+                INVALID_BIRTH_DATE,
+                attachments=profile_cancel_keyboard(),
+                menu_bar=False,
+            )
             return True
         user.birth_date = birth_date
         _clear_profile_flow(user)
@@ -245,7 +295,12 @@ async def handle_profile_flow_message(
 
     if state == PROFILE_FLOW_ADDRESS:
         if not is_valid_address(text):
-            await max_client.send_message(user.max_user_id, INVALID_ADDRESS)
+            await max_client.send_message(
+                user.max_user_id,
+                INVALID_ADDRESS,
+                attachments=profile_cancel_keyboard(),
+                menu_bar=False,
+            )
             return True
         await apply_address_to_user(user, text.strip())
         _clear_profile_flow(user)

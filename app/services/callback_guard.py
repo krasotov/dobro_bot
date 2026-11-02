@@ -8,7 +8,7 @@ _ACTION_DEBOUNCE_SEC = 2.0
 _seen_callback_ids: dict[str, float] = {}
 _recent_actions: dict[tuple[int, str], float] = {}
 
-LIST_REFRESH_PAYLOADS = frozenset({"menu_transport_ops", "menu_appeals_ops"})
+LIST_REFRESH_PAYLOADS = frozenset({"menu_transport_ops", "menu_appeals_ops", "menu_service_notes_ops"})
 
 
 def _purge_expired(store: dict, ttl: float, now: float) -> None:
@@ -20,10 +20,11 @@ def _purge_expired(store: dict, ttl: float, now: float) -> None:
 def is_duplicate_callback(callback_id: str) -> bool:
     now = time.monotonic()
     _purge_expired(_seen_callback_ids, _CALLBACK_TTL_SEC, now)
-    if callback_id in _seen_callback_ids:
-        return True
-    _seen_callback_ids[callback_id] = now
-    return False
+    return callback_id in _seen_callback_ids
+
+
+def mark_callback_handled(callback_id: str) -> None:
+    _seen_callback_ids[callback_id] = time.monotonic()
 
 
 def is_debounced_action(max_user_id: int, payload: str) -> bool:

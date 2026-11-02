@@ -15,12 +15,15 @@ AUDIENCE_ROLES: tuple[dict[str, str], ...] = (
     {"slug": "driver", "title": "Водители"},
     {"slug": "garage_operator", "title": "Оператор гаража"},
     {"slug": "appeals_operator", "title": "Оператор обращений"},
+    {"slug": "it_operator", "title": "ИТ (служебные записки)"},
     {"slug": "operator", "title": "Оператор (все функции)"},
 )
 
 ORDER_TRANSPORT_ROLES = frozenset({"deputy", "administration"})
+SERVICE_NOTE_CREATOR_ROLES = frozenset({"administration", "budget"})
 GARAGE_OPERATOR_ROLES = frozenset({"garage_operator", "operator"})
 APPEALS_OPERATOR_ROLES = frozenset({"appeals_operator", "operator"})
+IT_OPERATOR_ROLES = frozenset({"it_operator", "operator"})
 
 VALID_AUDIENCE_SLUGS = {item["slug"] for item in AUDIENCE_ROLES}
 
@@ -98,3 +101,13 @@ def user_is_appeals_operator(user: User) -> bool:
 def user_is_transport_operator(user: User) -> bool:
     """Обратная совместимость."""
     return user_is_garage_operator(user)
+
+
+def user_can_create_service_note(user: User) -> bool:
+    roles = set(parse_audience_roles(user.audience_roles))
+    return bool(roles & SERVICE_NOTE_CREATOR_ROLES)
+
+
+def user_is_it_operator(user: User) -> bool:
+    roles = set(parse_audience_roles(user.audience_roles))
+    return bool(roles & IT_OPERATOR_ROLES)
