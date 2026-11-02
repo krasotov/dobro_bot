@@ -1,0 +1,58 @@
+Доброчат (MAX bot) — передача проекта
+=====================================
+
+Репозиторий: https://github.com/krasotov/dobro_bot
+Это автономный сервис: свой VPS, свой домен, свой токен бота в MAX.
+Внешний портал admspgo.ru и мобильное приложение в комплект НЕ входят.
+
+Быстрый старт
+-------------
+1. git clone https://github.com/krasotov/dobro_bot.git
+2. cp .env.example .env — заполнить (см. ниже)
+3. docker compose up -d --build
+4. Настроить DNS и SSL (deploy/nginx.conf — ваш server_name)
+5. POST /setup-webhook с паролем ADMIN_PASSWORD
+6. Админка: https://ВАШ_ДОМЕН/admin/
+
+Обязательные переменные (.env)
+------------------------------
+MAX_BOT_TOKEN          — business.max.ru → бот → токен
+WEBHOOK_URL            — https://домен/webhook
+ADMIN_USERNAME         — логин веб-админки
+ADMIN_PASSWORD         — надёжный пароль
+SECRET_KEY             — случайная строка для сессий
+POSTGRES_PASSWORD      — пароль PostgreSQL
+MAX_WEBHOOK_SECRET     — случайная строка (проверка webhook)
+DADATA_API_KEY/SECRET  — желательно для адресов (dadata.ru)
+
+НЕ задавать (standalone):
+ADMSPGO_API_URL
+ADMSPGO_INTERNAL_TOKEN
+
+Опционально:
+INTERNAL_API_TOKEN     — доступ к /internal/v1 для скриптов/интеграций
+
+Админка (/admin)
+----------------
+- Пользователи, CSV, рассылки по районам, скриншоты
+- Операторы (роли), автоновости из канала MAX
+Подробнее: README.md, docs/STANDALONE.md
+
+Что без ADMSPGO не работает
+---------------------------
+Справочник, опросы, темы подписок, обращения на внешний портал,
+синхронизация служебок во внешнюю CRM — только при своей интеграции.
+
+В боте локально работают: регистрация, рассылки, транспорт и служебные
+записки ИТ (данные в PostgreSQL этого проекта).
+
+Безопасность
+------------
+- Не использовать prod-секреты заказчика
+- Сменить все пароли после первого входа
+- .env не коммитить в git
+
+Поддержка MAX API
+-----------------
+MAX_API_VERIFY_SSL=false — часто нужно на VPS до установки сертификата Минцифры.
+Документация: https://dev.max.ru/docs-api
